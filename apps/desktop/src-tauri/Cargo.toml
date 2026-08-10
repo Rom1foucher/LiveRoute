@@ -1,0 +1,24 @@
+[package]
+name = "grand-live-carryover-planner-ocr"
+version = "1.0.0"
+description = "Local snapshot OCR companion for the Grand Live scenario"
+authors = ["Romain Foucher"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "grand_live_carryover_planner_ocr_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2", features = [] }
+tauri-plugin-global-shortcut = "2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
+xcap = "0.9.7"

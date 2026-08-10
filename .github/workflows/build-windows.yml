@@ -1,0 +1,46 @@
+name: Build desktop (Windows)
+
+# Keep the native build outside the critical path for solver-only changes.
+# It runs for version tags or an explicit manual request.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - name: Prepare OCR resources
+        run: npm run prepare:ocr
+      - name: Build without publishing
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: npm run build:desktop
+      - name: Build and publish the release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: Live Route ${{ github.ref_name }}
+          releaseBody: Live Route Windows installer with local OCR.
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe

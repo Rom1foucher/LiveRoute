@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@glcp/core": ["../core/src/index.ts"],
+      "@glcp/core/i18n": ["../core/src/i18n/index.ts"],
+      "@glcp/core/ports": ["../core/src/ports/index.ts"],
+      "@glcp/core/adapters/browser": ["../core/src/adapters/browser.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

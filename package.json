@@ -1,0 +1,28 @@
+{
+  "name": "grand-live-carryover-planner",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "test:core": "npm run test --workspace @glcp/core",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "dev:web": "npm run dev --workspace @glcp/web",
+    "dev:desktop": "npm run desktop --workspace @glcp/desktop",
+    "build:web": "npm run build --workspace @glcp/web",
+    "build:desktop": "npm run desktop:build --workspace @glcp/desktop",
+    "prepare:ocr": "npm run prepare:ocr --workspace @glcp/desktop",
+    "test:ui": "npm run test --workspace @glcp/ui",
+    "test:desktop": "npm run test --workspace @glcp/desktop"
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.2"
+  }
+}

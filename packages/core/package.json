@@ -1,0 +1,19 @@
+{
+  "name": "@glcp/core",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./ports": "./src/ports/index.ts",
+    "./adapters/browser": "./src/adapters/browser.ts"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0"
+  }
+}
