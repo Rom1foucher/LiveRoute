@@ -490,7 +490,9 @@ const buildDecision = (
         ? `${language === "fr" ? "Push forcé" : "Forced push"} · Option ${
             (display.displayedTechniqueIndex ?? 0) + 1
           }`
-        : solver.recommendation.label;
+        : techniqueResult
+          ? (solver.recommendation?.label ?? "")
+          : "";
 
   const summary = diagnostics.displayedBlocking
     ? diagnostics.displayedBlockingAssessment?.blocking
@@ -505,7 +507,7 @@ const buildDecision = (
       : ((policy?.reasons[0] && t(policy.reasons[0])) ??
         (techniqueResult?.terminalDecision &&
           t(techniqueResult.terminalDecision.reason)) ??
-        solver.recommendation.detail);
+        solver.recommendation?.detail ?? "");
 
   return {
     bestTechniqueIndex: display.displayedTechniqueIndex,

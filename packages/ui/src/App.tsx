@@ -1258,11 +1258,14 @@ export default function App({
             : "safe";
   const resultTone = songPolicy?.recommended
     ? policyTone
-    : techniqueStrategy?.shouldSave
-      ? "reserve"
-      : (result?.recommendation ?? "risky");
+    : result
+      ? techniqueStrategy?.shouldSave
+        ? "reserve"
+        : result.recommendation
+      : null;
   const displayObjective = result?.objective ?? analysisObjective;
   const recommendation = useMemo(() => {
+    if (!result) return null;
     const objectiveLabel =
       displayObjective === "priority-song"
         ? L.app.objectivePrioritySong
@@ -1298,8 +1301,8 @@ export default function App({
         detail: L.app.leCoutIndiqueDepasseTon,
       },
     };
-    return content[resultTone];
-  }, [displayObjective, resultTone]);
+    return content[resultTone ?? result.recommendation];
+  }, [displayObjective, result, resultTone]);
 
   const rollNote =
     availableSongs.length >= 3
@@ -2108,7 +2111,7 @@ export default function App({
     ? "loading"
     : forcedTechnique
       ? "push"
-      : resultTone;
+      : (resultTone ?? "idle");
 
   const actions: ActionsView = {
     advanceConcert,

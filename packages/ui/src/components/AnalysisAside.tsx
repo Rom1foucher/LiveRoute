@@ -114,7 +114,7 @@ export function AnalysisAside({
                   ? L.aside.moinsMauvaisChoixBloquant
                   : forcedTechnique
                     ? L.aside.forcedPushOption(forcedTechnique.index + 1)
-                    : recommendation.label}
+                    : (recommendation?.label ?? "")}
               </h2>
               <p>
                 {displayedBlocking
@@ -125,7 +125,7 @@ export function AnalysisAside({
                     ? L.aside.leVerdictStopHoldNormal
                     : displayedTechniqueResult.terminalDecision
                       ? t(displayedTechniqueResult.terminalDecision.reason)
-                      : recommendation.detail}
+                      : (recommendation?.detail ?? "")}
               </p>
               {/*
                 v0.22.15: a non-blocking warning. The option stays valid, it is

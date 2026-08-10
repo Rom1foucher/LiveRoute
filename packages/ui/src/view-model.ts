@@ -86,7 +86,8 @@ export type SolverView = {
   songPolicy: SongPolicyResult | null;
   normalSongPolicy: SongPolicyEvaluation | null;
   strategicPlan: StrategicPlan;
-  recommendation: { label: string; detail: string };
+  /** Null until the solver has produced an actual technique decision. */
+  recommendation: { label: string; detail: string } | null;
   goalLabel: string;
   techniqueStrategy: ReturnType<typeof evaluateTechniqueStrategy> | null;
   optionAnalyses: OptionAnalysis[];
