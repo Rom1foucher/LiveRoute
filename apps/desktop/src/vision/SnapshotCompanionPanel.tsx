@@ -21,6 +21,11 @@ import {
   syncOverlayWindow,
 } from "./desktop.ts";
 import { classifyTokenColour, loadImage } from "./image.ts";
+import {
+  calibrationTargetLabel,
+  localizeOcrRuntimeText,
+  ocrText,
+} from "./i18n.ts";
 import { fitContainedFrame } from "./preview-geometry.ts";
 import type { ContainedFrame } from "./preview-geometry.ts";
 import {
@@ -137,24 +142,38 @@ const TOKEN_SHORT: Record<TokenKey, string> = {
   mental: "Me",
 };
 
-const SNAPSHOT_RISK_LABELS: Record<RiskProfile, string> = {
-  safe: "Sûr",
+const snapshotRiskLabels = (
+  language: Language,
+): Record<RiskProfile, string> => ({
+  safe: ocrText(language, "Sûr", "Safe"),
   standard: "Standard",
   greedy: "Greedy",
-};
+});
 
-const SNAPSHOT_GENERATION_LABELS: Record<GenerationProfile, string> = {
-  "speed-wit": "Speed / Wit dominant",
+const snapshotGenerationLabels = (
+  language: Language,
+): Record<GenerationProfile, string> => ({
+  "speed-wit": ocrText(language, "Speed / Wit dominant", "Speed / Wit focused"),
   "speed-stamina-wit": "Speed / Stamina / Wit",
-  "power-present": "Power présent",
-  balanced: "Équilibré",
-};
+  "power-present": ocrText(language, "Power présent", "Power present"),
+  balanced: ocrText(language, "Équilibré", "Balanced"),
+});
 
-const SNAPSHOT_OBJECTIVE_LABELS: Record<AnalysisObjective, string> = {
-  carryover: "Atteindre la sélection",
-  "any-song": "Acheter toute song",
-  "priority-song": "Trouver une priorité",
-};
+const snapshotObjectiveLabels = (
+  language: Language,
+): Record<AnalysisObjective, string> => ({
+  carryover: ocrText(
+    language,
+    "Atteindre la sélection",
+    "Reach song selection",
+  ),
+  "any-song": ocrText(language, "Acheter toute song", "Buy any song"),
+  "priority-song": ocrText(
+    language,
+    "Trouver une priorité",
+    "Find a priority song",
+  ),
+});
 
 const emptyDraftBalance = (): DraftBalance =>
   Object.fromEntries(TOKEN_KEYS.map((key) => [key, ""])) as DraftBalance;
@@ -197,6 +216,7 @@ const buildAppliedVisionSnapshot = ({
   draftTechniques,
   draftSongs,
   context,
+  language,
   manuallyConfirmed = false,
   extraWarnings = [],
 }: {
@@ -206,6 +226,7 @@ const buildAppliedVisionSnapshot = ({
   draftTechniques: DraftBalance[];
   draftSongs: Array<string | null>;
   context: RecognitionContext;
+  language: Language;
   manuallyConfirmed?: boolean;
   extraWarnings?: string[];
 }): VisionSnapshot => {
@@ -234,7 +255,7 @@ const buildAppliedVisionSnapshot = ({
             alternatives: original.alternatives,
             ambiguity: original.ambiguity,
             diagnostic: manuallyChanged
-              ? `${original.diagnostic ?? "OCR corrigé"} · confirmation manuelle ${tokens[key]}`
+              ? `${original.diagnostic ?? ocrText(language, "OCR corrigé", "OCR corrected")} · ${ocrText(language, "confirmation manuelle", "manual confirmation")} ${tokens[key]}`
               : original.diagnostic,
           },
         ];
@@ -261,7 +282,15 @@ const buildAppliedVisionSnapshot = ({
                   : Math.max(original?.confidence ?? 0, 0.9)
                 : (original?.confidence ?? 0),
               rawText: original?.rawText ?? "",
-              warnings: plausible ? [] : ["vecteur à vérifier"],
+              warnings: plausible
+                ? []
+                : [
+                    ocrText(
+                      language,
+                      "vecteur à vérifier",
+                      "cost vector requires review",
+                    ),
+                  ],
             };
           })
         : [],
@@ -301,17 +330,18 @@ const buildAppliedVisionSnapshot = ({
   return next;
 };
 
-const confidenceLabel = (value: number): string =>
+const confidenceLabel = (value: number, language: Language): string =>
   value >= 0.8
-    ? "Très fiable"
+    ? ocrText(language, "Très fiable", "Very reliable")
     : value >= 0.58
-      ? "Fiable"
+      ? ocrText(language, "Fiable", "Reliable")
       : value > 0
-        ? "À vérifier"
-        : "Non lu";
+        ? ocrText(language, "À vérifier", "Review")
+        : ocrText(language, "Non lu", "Not read");
 
 const stockContinuityWarningText = (
   assessment: StockContinuityAssessment,
+  language: Language,
 ): string => {
   const details = assessment.issues
     .slice(0, 3)
@@ -322,19 +352,20 @@ const stockContinuityWarningText = (
     .join(" · ");
   const remainder =
     assessment.issues.length > 3
-      ? ` · +${assessment.issues.length - 3} couleur(s)`
+      ? ` · +${assessment.issues.length - 3} ${ocrText(language, "couleur(s)", "colour(s)")}`
       : "";
-  return `Variation de stock inhabituelle : ${details}${remainder}.`;
+  return `${ocrText(language, "Variation de stock inhabituelle", "Unusual stock change")}: ${details}${remainder}.`;
 };
 
 const confidenceTone = (value: number): string =>
   value >= 0.8 ? "good" : value >= 0.58 ? "medium" : "bad";
 
-const techniqueLabel = (cost: Balance): string => {
+const techniqueLabel = (cost: Balance, language: Language): string => {
   const entries = TOKEN_KEYS.filter((key) => cost[key] > 0);
   if (entries.length === 2) return "Duo";
-  if (entries.length === 1) return "Technique simple";
-  return "Coût incomplet";
+  if (entries.length === 1)
+    return ocrText(language, "Technique simple", "Single technique");
+  return ocrText(language, "Coût incomplet", "Incomplete cost");
 };
 
 const overlayPayload = (
@@ -470,11 +501,20 @@ const overlayPayload = (
   };
 };
 
-const fileAsDataUrl = (file: File): Promise<string> =>
+const fileAsDataUrl = (file: File, language: Language): Promise<string> =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error("Lecture du fichier impossible."));
+    reader.onerror = () =>
+      reject(
+        new Error(
+          ocrText(
+            language,
+            "Lecture du fichier impossible.",
+            "Could not read the file.",
+          ),
+        ),
+      );
     reader.readAsDataURL(file);
   });
 
@@ -490,40 +530,67 @@ const profileDownload = (profile: VisionProfile) => {
   URL.revokeObjectURL(url);
 };
 
-const calibrationHelp = (id: string): { title: string; body: string } => {
+const calibrationHelp = (
+  id: string,
+  language: Language,
+): { title: string; body: string } => {
   if (id.startsWith("token.")) {
     return {
-      title: "Valeur de token",
-      body: "Encadre uniquement le nombre. N’inclus ni l’icône colorée, ni la valeur voisine, ni le bandeau Performance Points.",
+      title: ocrText(language, "Valeur de token", "Token value"),
+      body: ocrText(
+        language,
+        "Encadre uniquement le nombre. N’inclus ni l’icône colorée, ni la valeur voisine, ni le bandeau Performance Points.",
+        "Draw the box around the number only. Exclude the coloured icon, adjacent value and Performance Points banner.",
+      ),
     };
   }
   if (id.includes(".cost.")) {
     return {
-      title: "Chiffre de coût",
-      body: "Encadre un seul nombre dans sa colonne Da/Pa/Vo/Vi/Me. Le zéro doit rester dans la zone : les cinq colonnes sont lues séparément.",
+      title: ocrText(language, "Chiffre de coût", "Cost number"),
+      body: ocrText(
+        language,
+        "Encadre un seul nombre dans sa colonne Da/Pa/Vo/Vi/Me. Le zéro doit rester dans la zone : les cinq colonnes sont lues séparément.",
+        "Draw the box around one number in its Da/Pa/Vo/Vi/Me column. Keep zero inside the region: all five columns are read separately.",
+      ),
     };
   }
   if (id.startsWith("technique.") && id.endsWith(".text")) {
     return {
-      title: "Texte de technique",
-      body: "Encadre les lignes qui décrivent le type et le niveau de la technique. Cette zone distingue notamment Mono, Duo, Hint et Energy.",
+      title: ocrText(language, "Texte de technique", "Technique text"),
+      body: ocrText(
+        language,
+        "Encadre les lignes qui décrivent le type et le niveau de la technique. Cette zone distingue notamment Mono, Duo, Hint et Energy.",
+        "Draw the box around the lines describing the technique type and level. This region distinguishes Mono, Duo, Hint and Energy.",
+      ),
     };
   }
   if (id.endsWith(".card")) {
     return {
-      title: "Contour de carte",
-      body: "Encadre toute la carte, bord extérieur compris. Cette zone ne sert qu’au highlight de l’overlay.",
+      title: ocrText(language, "Contour de carte", "Card outline"),
+      body: ocrText(
+        language,
+        "Encadre toute la carte, bord extérieur compris. Cette zone ne sert qu’au highlight de l’overlay.",
+        "Draw the box around the entire card, including its outer border. This region is used only for the overlay highlight.",
+      ),
     };
   }
   if (id.endsWith(".cover")) {
     return {
-      title: "Pochette de song",
-      body: "Encadre l’image seule, sans sa bordure ni le texte voisin. Son empreinte visuelle complète la lecture du titre.",
+      title: ocrText(language, "Pochette de song", "Song cover"),
+      body: ocrText(
+        language,
+        "Encadre l’image seule, sans sa bordure ni le texte voisin. Son empreinte visuelle complète la lecture du titre.",
+        "Draw the box around the image only, excluding its border and adjacent text. Its visual fingerprint complements title recognition.",
+      ),
     };
   }
   return {
-    title: "Titre de song",
-    body: "Encadre uniquement la ligne du titre. Exclue le badge Songs, la pochette et les deux lignes de bonus.",
+    title: ocrText(language, "Titre de song", "Song title"),
+    body: ocrText(
+      language,
+      "Encadre uniquement la ligne du titre. Exclue le badge Songs, la pochette et les deux lignes de bonus.",
+      "Draw the box around the title line only. Exclude the Songs badge, cover and two bonus lines.",
+    ),
   };
 };
 
@@ -547,6 +614,10 @@ export default function SnapshotCompanionPanel({
   onClose,
 }: SnapshotCompanionPanelProps) {
   const desktop = isDesktopRuntime();
+  const text = (french: string, english: string) =>
+    ocrText(language, french, english);
+  const runtimeText = (value: string) =>
+    localizeOcrRuntimeText(language, value);
   const [tab, setTab] = useState<PanelTab>("live");
   const [profile, setProfile] = useState<VisionProfile>(() =>
     cloneVisionProfile(DEFAULT_VISION_PROFILE),
@@ -602,8 +673,12 @@ export default function SnapshotCompanionPanel({
   const [dismissedStockContinuity, setDismissedStockContinuity] = useState("");
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<OcrProgress | null>(null);
-  const [message, setMessage] = useState(
-    "Choisis la fenêtre du jeu, puis prends un snapshot.",
+  const [message, setMessage] = useState(() =>
+    ocrText(
+      language,
+      "Choisis la fenêtre du jeu, puis prends un snapshot.",
+      "Select the game window, then take a snapshot.",
+    ),
   );
   const [error, setError] = useState("");
   const [calibrationTargetId, setCalibrationTargetId] = useState("token.dance");
@@ -643,6 +718,19 @@ export default function SnapshotCompanionPanel({
     [availableSongIds],
   );
   const expectedSongCount = Math.min(3, availableSongIds.length);
+
+  useEffect(() => {
+    if (open || snapshot || frame) return;
+    setMessage(
+      ocrText(
+        language,
+        "Choisis la fenêtre du jeu, puis prends un snapshot.",
+        "Select the game window, then take a snapshot.",
+      ),
+    );
+    setError("");
+    setCalibrationLearningResult("");
+  }, [frame, language, open, snapshot]);
 
   useEffect(() => {
     profileRef.current = profile;
@@ -727,7 +815,10 @@ export default function SnapshotCompanionPanel({
       setError(
         reason instanceof Error
           ? reason.message
-          : "Impossible de lister les fenêtres.",
+          : text(
+              "Impossible de lister les fenêtres.",
+              "Could not list windows.",
+            ),
       );
     }
   }, [desktop]);
@@ -766,18 +857,24 @@ export default function SnapshotCompanionPanel({
           : next.songs.filter((item) => item.songId).length;
       if (reliability.reliable) {
         setMessage(
-          `${tokenCount}/5 tokens et ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} offres fiables. Analyse automatique…`,
+          text(
+            `${tokenCount}/5 tokens et ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} offres fiables. Analyse automatique…`,
+            `${tokenCount}/5 tokens and ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} reliable offers. Automatic analysis…`,
+          ),
         );
       } else {
         const issueCount =
           reliability.missing.length + reliability.uncertain.length;
         setMessage(
-          `${tokenCount}/5 tokens et ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} offres lus · ${issueCount} champ(s) à vérifier. Corrige puis appuie de nouveau pour analyser.`,
+          text(
+            `${tokenCount}/5 tokens et ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} offres lus · ${issueCount} champ(s) à vérifier. Corrige puis appuie de nouveau pour analyser.`,
+            `${tokenCount}/5 tokens and ${contentCount}/${next.page === "songs" ? expectedSongCount : 3} offers read · ${issueCount} field(s) to review. Correct them, then press again to analyse.`,
+          ),
         );
       }
       return { drafts, reliability };
     },
-    [availableSongIds, context, expectedSongCount],
+    [availableSongIds, context, expectedSongCount, language],
   );
 
   const recognizeCapturedFrame = useCallback(
@@ -789,7 +886,10 @@ export default function SnapshotCompanionPanel({
     ) => {
       setBusy(true);
       setError("");
-      setProgress({ status: "Préparation OCR", progress: 0 });
+      setProgress({
+        status: text("Préparation OCR", "Preparing OCR"),
+        progress: 0,
+      });
       await hideOverlay();
       try {
         const continuityBaseline = tokenContinuityBaseline
@@ -830,8 +930,9 @@ export default function SnapshotCompanionPanel({
             draftTechniques: accepted.drafts.techniques,
             draftSongs: accepted.drafts.songs,
             context,
+            language,
             extraWarnings: continuity
-              ? [stockContinuityWarningText(continuity)]
+              ? [stockContinuityWarningText(continuity, language)]
               : [],
           });
           setOverlayDismissed(false);
@@ -840,8 +941,14 @@ export default function SnapshotCompanionPanel({
           onApply(applied);
           setMessage(
             continuity
-              ? "Snapshot appliqué. Vérifie l’écart de stock signalé si la run n’a pas évolué hors OCR."
-              : "Snapshot fiable : appliqué et analysé automatiquement.",
+              ? text(
+                  "Snapshot appliqué. Vérifie l’écart de stock signalé si la run n’a pas évolué hors OCR.",
+                  "Snapshot applied. Review the reported stock difference if the run did not change outside OCR.",
+                )
+              : text(
+                  "Snapshot fiable : appliqué et analysé automatiquement.",
+                  "Reliable snapshot: applied and analysed automatically.",
+                ),
           );
         }
         setTab("live");
@@ -849,8 +956,11 @@ export default function SnapshotCompanionPanel({
         if (!captureGateRef.current.isCurrent(generation)) return;
         setError(
           reason instanceof Error
-            ? reason.message
-            : "La reconnaissance du snapshot a échoué.",
+            ? runtimeText(reason.message)
+            : text(
+                "La reconnaissance du snapshot a échoué.",
+                "Snapshot recognition failed.",
+              ),
         );
       } finally {
         if (captureGateRef.current.isCurrent(generation)) {
@@ -862,6 +972,7 @@ export default function SnapshotCompanionPanel({
     [
       acceptRecognition,
       context,
+      language,
       onApply,
       onPipelineTimings,
       tokenContinuityBaseline,
@@ -875,14 +986,17 @@ export default function SnapshotCompanionPanel({
     const selected = windowKeyRef.current;
     if (!selected) {
       setError(
-        "Aucune fenêtre n’est sélectionnée. Ouvre le panneau et actualise la liste.",
+        text(
+          "Aucune fenêtre n’est sélectionnée. Ouvre le panneau et actualise la liste.",
+          "No window is selected. Open the panel and refresh the list.",
+        ),
       );
       captureGateRef.current.finish(generation);
       return;
     }
     setBusy(true);
     setError("");
-    setMessage("Capture de la fenêtre…");
+    setMessage(text("Capture de la fenêtre…", "Capturing window…"));
     try {
       const captureStartedAt = performance.now();
       const nextFrame = await captureWindow(selected);
@@ -899,14 +1013,14 @@ export default function SnapshotCompanionPanel({
         setProgress(null);
         setError(
           reason instanceof Error
-            ? reason.message
-            : "La capture Windows a échoué.",
+            ? runtimeText(reason.message)
+            : text("La capture Windows a échoué.", "Windows capture failed."),
         );
       }
     } finally {
       captureGateRef.current.finish(generation);
     }
-  }, [onOpen, recognizeCapturedFrame]);
+  }, [language, onOpen, recognizeCapturedFrame]);
 
   useEffect(() => {
     captureRef.current = () => {
@@ -933,15 +1047,21 @@ export default function SnapshotCompanionPanel({
       .catch((reason) => {
         setError(
           reason instanceof Error
-            ? `Hotkey invalide : ${reason.message}`
-            : "Impossible d’enregistrer la hotkey.",
+            ? text(
+                `Hotkey invalide : ${reason.message}`,
+                `Invalid hotkey: ${reason.message}`,
+              )
+            : text(
+                "Impossible d’enregistrer la hotkey.",
+                "Could not register the hotkey.",
+              ),
         );
       });
     return () => {
       disposed = true;
       if (unregister) void unregister();
     };
-  }, [desktop, profile.capture.hotkey, profileReady]);
+  }, [desktop, language, profile.capture.hotkey, profileReady]);
 
   useEffect(() => {
     if (
@@ -998,9 +1118,10 @@ export default function SnapshotCompanionPanel({
       draftTechniques,
       draftSongs,
       context,
+      language,
       manuallyConfirmed: true,
       extraWarnings: stockContinuity
-        ? [stockContinuityWarningText(stockContinuity)]
+        ? [stockContinuityWarningText(stockContinuity, language)]
         : [],
     });
     setOverlayDismissed(false);
@@ -1009,8 +1130,14 @@ export default function SnapshotCompanionPanel({
     onApply(next);
     setMessage(
       stockContinuity
-        ? "Snapshot validé avec un écart de stock non bloquant."
-        : "Snapshot validé. Le solver calcule la recommandation et l’overlay se met à jour.",
+        ? text(
+            "Snapshot validé avec un écart de stock non bloquant.",
+            "Snapshot validated with a non-blocking stock difference.",
+          )
+        : text(
+            "Snapshot validé. Le solver calcule la recommandation et l’overlay se met à jour.",
+            "Snapshot validated. The solver is calculating the recommendation and updating the overlay.",
+          ),
     );
   };
 
@@ -1018,11 +1145,16 @@ export default function SnapshotCompanionPanel({
     if (!file) return;
     const generation = captureGateRef.current.begin();
     if (generation === null) {
-      setMessage("Une capture OCR est déjà en cours.");
+      setMessage(
+        text(
+          "Une capture OCR est déjà en cours.",
+          "An OCR capture is already running.",
+        ),
+      );
       return;
     }
     try {
-      const dataUrl = await fileAsDataUrl(file);
+      const dataUrl = await fileAsDataUrl(file, language);
       const image = await loadImage(dataUrl);
       const nextFrame: CaptureFrame = {
         window: {
@@ -1045,8 +1177,11 @@ export default function SnapshotCompanionPanel({
       if (captureGateRef.current.isCurrent(generation)) {
         setError(
           reason instanceof Error
-            ? reason.message
-            : "Le screenshot ne peut pas être importé.",
+            ? runtimeText(reason.message)
+            : text(
+                "Le screenshot ne peut pas être importé.",
+                "The screenshot could not be imported.",
+              ),
         );
       }
     } finally {
@@ -1109,7 +1244,10 @@ export default function SnapshotCompanionPanel({
       : 99;
     if (!Number.isInteger(expected) || expected < 0 || expected > maximum) {
       setCalibrationLearningResult(
-        `Indique une valeur entière entre 0 et ${maximum}.`,
+        text(
+          `Indique une valeur entière entre 0 et ${maximum}.`,
+          `Enter an integer between 0 and ${maximum}.`,
+        ),
       );
       return;
     }
@@ -1118,7 +1256,10 @@ export default function SnapshotCompanionPanel({
     setError("");
     try {
       setProgress({
-        status: "Localisation des glyphes numériques",
+        status: text(
+          "Localisation des glyphes numériques",
+          "Locating numeric glyphs",
+        ),
         progress: 0.2,
       });
       const source = await loadImage(frame.dataUrl);
@@ -1131,7 +1272,10 @@ export default function SnapshotCompanionPanel({
       );
       if (!sample) {
         setCalibrationLearningResult(
-          `Aucun groupe de ${String(expected).length} glyphe(s) cohérent n’a été isolé. Aucun réglage existant ni aucune zone n’a été modifié.`,
+          text(
+            `Aucun groupe de ${String(expected).length} glyphe(s) cohérent n’a été isolé. Aucun réglage existant ni aucune zone n’a été modifié.`,
+            `No consistent group of ${String(expected).length} glyph(s) could be isolated. No existing setting or region was changed.`,
+          ),
         );
         return;
       }
@@ -1184,16 +1328,22 @@ export default function SnapshotCompanionPanel({
 
       const learnedDigits = [...new Set(String(expected).split(""))].join(", ");
       setCalibrationLearningResult(
-        `Échantillon ajouté et appliqué au snapshot courant : ${expected} · ${sample.componentCount} glyphe(s) isolé(s) · modèles ajoutés pour ${learnedDigits}. La zone logique reste inchangée.`,
+        text(
+          `Échantillon ajouté et appliqué au snapshot courant : ${expected} · ${sample.componentCount} glyphe(s) isolé(s) · modèles ajoutés pour ${learnedDigits}. La zone logique reste inchangée.`,
+          `Sample added and applied to the current snapshot: ${expected} · ${sample.componentCount} isolated glyph(s) · models added for ${learnedDigits}. The logical region is unchanged.`,
+        ),
       );
       setMessage(
-        `${activeCalibrationTarget.label} utilise maintenant la valeur ${expected}; les prochains snapshots emploieront immédiatement ce modèle.`,
+        text(
+          `${activeCalibrationTarget.label} utilise maintenant la valeur ${expected}; les prochains snapshots emploieront immédiatement ce modèle.`,
+          `${calibrationTargetLabel(language, activeCalibrationTarget.id, activeCalibrationTarget.label)} now uses value ${expected}; subsequent snapshots will use this model immediately.`,
+        ),
       );
     } catch (reason) {
       setCalibrationLearningResult(
         reason instanceof Error
-          ? reason.message
-          : "L’apprentissage OCR a échoué.",
+          ? runtimeText(reason.message)
+          : text("L’apprentissage OCR a échoué.", "OCR learning failed."),
       );
     } finally {
       setCalibrationLearning(false);
@@ -1209,7 +1359,10 @@ export default function SnapshotCompanionPanel({
       return next;
     });
     setCalibrationLearningResult(
-      `Apprentissage OCR oublié pour ${activeCalibrationTarget.label}. La zone reste inchangée.`,
+      text(
+        `Apprentissage OCR oublié pour ${activeCalibrationTarget.label}. La zone reste inchangée.`,
+        `OCR learning cleared for ${calibrationTargetLabel(language, activeCalibrationTarget.id, activeCalibrationTarget.label)}. The region is unchanged.`,
+      ),
     );
   };
 
@@ -1218,9 +1371,14 @@ export default function SnapshotCompanionPanel({
     try {
       const parsed = JSON.parse(await file.text()) as Partial<VisionProfile>;
       setProfile(normalizeVisionProfile(parsed));
-      setMessage("Profil OCR importé.");
+      setMessage(text("Profil OCR importé.", "OCR profile imported."));
     } catch {
-      setError("Ce fichier n’est pas un profil OCR JSON valide.");
+      setError(
+        text(
+          "Ce fichier n’est pas un profil OCR JSON valide.",
+          "This file is not a valid OCR JSON profile.",
+        ),
+      );
     }
   };
 
@@ -1304,19 +1462,25 @@ export default function SnapshotCompanionPanel({
   );
   const primaryActionLabel = pendingReview
     ? resultReady
-      ? "Valider et analyser"
-      : "Compléter les champs"
+      ? text("Valider et analyser", "Validate and analyse")
+      : text("Compléter les champs", "Complete the fields")
     : busy
-      ? "Lecture…"
-      : "Capturer maintenant";
+      ? text("Lecture…", "Reading…")
+      : text("Capturer maintenant", "Capture now");
 
   const handlePrimarySnapshotAction = () => {
     if (pendingReview) {
       if (!resultReady) {
         setError(
           techniqueVectorsValid
-            ? `Complète les 5 tokens et les ${requiredOfferCount} offres avant l’analyse.`
-            : "Au moins un coût de technique est incomplet ou impossible pour cette période.",
+            ? text(
+                `Complète les 5 tokens et les ${requiredOfferCount} offres avant l’analyse.`,
+                `Complete all 5 tokens and ${requiredOfferCount} offers before analysis.`,
+              )
+            : text(
+                "Au moins un coût de technique est incomplet ou impossible pour cette période.",
+                "At least one technique cost is incomplete or impossible for this period.",
+              ),
         );
         return;
       }
@@ -1351,48 +1515,69 @@ export default function SnapshotCompanionPanel({
   const confirmTechniquePurchase = (slot: number) => {
     if (!purchaseReady || !onConfirmTechniquePurchase(slot)) {
       setError(
-        "Le solver ne peut pas enregistrer cet achat dans son état actuel.",
+        text(
+          "Le solver ne peut pas enregistrer cet achat dans son état actuel.",
+          "The solver cannot record this purchase in its current state.",
+        ),
       );
       return;
     }
     clearAfterPurchase(
-      "Technique enregistrée. Affiche l’offre suivante puis reprends un snapshot.",
+      text(
+        "Technique enregistrée. Affiche l’offre suivante puis reprends un snapshot.",
+        "Technique recorded. Display the next offer, then take another snapshot.",
+      ),
     );
   };
 
   const confirmSongPurchase = (songId: string | null) => {
     if (!songId || !purchaseReady || !onConfirmSongPurchase(songId)) {
       setError(
-        "Le solver ne peut pas enregistrer cette song dans son état actuel.",
+        text(
+          "Le solver ne peut pas enregistrer cette song dans son état actuel.",
+          "The solver cannot record this song in its current state.",
+        ),
       );
       return;
     }
     clearAfterPurchase(
-      "Song enregistrée. Le cycle suivant est prêt pour un nouveau snapshot.",
+      text(
+        "Song enregistrée. Le cycle suivant est prêt pour un nouveau snapshot.",
+        "Song recorded. The next cycle is ready for a new snapshot.",
+      ),
     );
   };
   const advanceConcertFromSnapshot = () => {
     if (!decisionTools.canAdvanceConcert || !decisionTools.onAdvanceConcert()) {
       setError(
         decisionTools.advanceDisabledReason ||
-          "Le concert ne peut pas encore être enregistré.",
+          text(
+            "Le concert ne peut pas encore être enregistré.",
+            "The concert cannot be recorded yet.",
+          ),
       );
       return;
     }
     clearAfterPurchase(
       decisionTools.nextConcertLabel
-        ? `Concert enregistré. ${decisionTools.nextConcertLabel} est prêt.`
-        : "Concert enregistré.",
+        ? text(
+            `Concert enregistré. ${decisionTools.nextConcertLabel} est prêt.`,
+            `Concert recorded. ${decisionTools.nextConcertLabel} is ready.`,
+          )
+        : text("Concert enregistré.", "Concert recorded."),
     );
   };
   const undoFromSnapshot = () => {
     if (!decisionTools.canUndo) return;
     decisionTools.onUndo();
     clearAfterPurchase(
-      "Dernière action annulée. Reprends un snapshot de la page actuellement affichée.",
+      text(
+        "Dernière action annulée. Reprends un snapshot de la page actuellement affichée.",
+        "Last action undone. Take another snapshot of the page currently displayed.",
+      ),
     );
   };
-  const help = calibrationHelp(activeCalibrationTarget.id);
+  const help = calibrationHelp(activeCalibrationTarget.id, language);
 
   return (
     <div className="snapshot-companion-backdrop">
@@ -1405,11 +1590,14 @@ export default function SnapshotCompanionPanel({
         <header className="snapshot-companion-header">
           <div>
             <span className="snapshot-companion-kicker">
-              Companion de run · capture locale
+              {text(
+                "Companion de run · capture locale",
+                "Run companion · local capture",
+              )}
             </span>
             <h2>Live OCR</h2>
           </div>
-          <nav aria-label="Sections du snapshot">
+          <nav aria-label={text("Sections du snapshot", "Snapshot sections")}>
             <button
               type="button"
               className={tab === "live" ? "active" : ""}
@@ -1422,7 +1610,7 @@ export default function SnapshotCompanionPanel({
               className={tab === "decision" ? "active" : ""}
               onClick={() => setTab("decision")}
             >
-              Décision
+              {text("Décision", "Decision")}
             </button>
             <button
               type="button"
@@ -1436,7 +1624,7 @@ export default function SnapshotCompanionPanel({
               className={tab === "settings" ? "active" : ""}
               onClick={() => setTab("settings")}
             >
-              Réglages
+              {text("Réglages", "Settings")}
             </button>
           </nav>
           {desktop && profile.automation.overlayEnabled && (
@@ -1447,7 +1635,10 @@ export default function SnapshotCompanionPanel({
                 setOverlayDismissed(true);
                 void hideOverlay();
               }}
-              title="Masquer l’overlay jusqu’au prochain snapshot appliqué"
+              title={text(
+                "Masquer l’overlay jusqu’au prochain snapshot appliqué",
+                "Hide the overlay until the next applied snapshot",
+              )}
             >
               Overlay ×
             </button>
@@ -1456,7 +1647,7 @@ export default function SnapshotCompanionPanel({
             className="snapshot-close"
             type="button"
             onClick={onClose}
-            aria-label="Fermer"
+            aria-label={text("Fermer", "Close")}
           >
             ×
           </button>
@@ -1475,10 +1666,12 @@ export default function SnapshotCompanionPanel({
                       event.target.value,
                     );
                   }}
-                  aria-label="Fenêtre à capturer"
+                  aria-label={text("Fenêtre à capturer", "Window to capture")}
                 >
                   {windows.length === 0 && (
-                    <option value="">Aucune fenêtre détectée</option>
+                    <option value="">
+                      {text("Aucune fenêtre détectée", "No window detected")}
+                    </option>
                   )}
                   {windows.map((item) => (
                     <option value={item.key} key={item.key}>
@@ -1491,12 +1684,12 @@ export default function SnapshotCompanionPanel({
                   className="snapshot-secondary"
                   onClick={() => void refreshWindows()}
                 >
-                  ↻ Fenêtres
+                  ↻ {text("Fenêtres", "Windows")}
                 </button>
               </>
             ) : (
               <label className="snapshot-file-button">
-                Importer un screenshot
+                {text("Importer un screenshot", "Import a screenshot")}
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp"
@@ -1542,7 +1735,7 @@ export default function SnapshotCompanionPanel({
                     onClick={() => void takeSnapshot()}
                     disabled={busy || !windowKey}
                   >
-                    Reprendre
+                    {text("Reprendre", "Retake")}
                   </button>
                 )}
                 <button
@@ -1558,7 +1751,7 @@ export default function SnapshotCompanionPanel({
                   {primaryActionLabel}
                   <small>
                     {pendingReview
-                      ? "Vérification manuelle"
+                      ? text("Vérification manuelle", "Manual review")
                       : profile.capture.hotkey}
                   </small>
                 </button>
@@ -1570,7 +1763,9 @@ export default function SnapshotCompanionPanel({
         {error && <div className="snapshot-alert error">{error}</div>}
         <div className="snapshot-status">
           <span className={busy ? "working" : snapshot ? "ready" : ""} />
-          <strong>{busy && progress ? progress.status : message}</strong>
+          <strong>
+            {busy && progress ? runtimeText(progress.status) : message}
+          </strong>
           {busy && progress && <em>{Math.round(progress.progress * 100)} %</em>}
         </div>
 
@@ -1580,14 +1775,16 @@ export default function SnapshotCompanionPanel({
             techniquePeriodMismatch.detected === decisionTools.concertPeriod ? (
               <div>
                 <strong>
-                  Page de techniques portée probablement consommée
+                  {text(
+                    "Page de techniques portée probablement consommée",
+                    "Carried technique page was probably consumed",
+                  )}
                 </strong>
                 <span>
-                  La run est bien en {decisionTools.concertPeriod}.
-                  L’application attend encore la page portée au tarif{" "}
-                  {techniquePeriodMismatch.expected}, mais les trois coûts lus
-                  correspondent déjà au tarif courant. Vérifie que l’achat de la
-                  technique portée a bien été confirmé dans l’application.
+                  {text(
+                    `La run est bien en ${decisionTools.concertPeriod}. L’application attend encore la page portée au tarif ${techniquePeriodMismatch.expected}, mais les trois coûts lus correspondent déjà au tarif courant. Vérifie que l’achat de la technique portée a bien été confirmé dans l’application.`,
+                    `The run is correctly set to ${decisionTools.concertPeriod}. The application still expects the carried page at ${techniquePeriodMismatch.expected} prices, but all three read costs already match the current prices. Check that the carried technique purchase was confirmed in the application.`,
+                  )}
                 </span>
               </div>
             ) : (
@@ -1595,20 +1792,29 @@ export default function SnapshotCompanionPanel({
                 <div>
                   <strong>
                     {techniquePeriodMismatch.direction === "state-ahead"
-                      ? "État probablement un concert en avance"
-                      : "État probablement un concert en retard"}
+                      ? text(
+                          "État probablement un concert en avance",
+                          "State is probably one concert ahead",
+                        )
+                      : text(
+                          "État probablement un concert en retard",
+                          "State is probably one concert behind",
+                        )}
                   </strong>
                   <span>
-                    Les trois coûts sont cohérents avec le barème{" "}
-                    {techniquePeriodMismatch.detected}, pas avec le barème{" "}
-                    {techniquePeriodMismatch.expected} utilisé par
-                    l’application.
+                    {text(
+                      `Les trois coûts sont cohérents avec le barème ${techniquePeriodMismatch.detected}, pas avec le barème ${techniquePeriodMismatch.expected} utilisé par l’application.`,
+                      `All three costs match the ${techniquePeriodMismatch.detected} price table, not the ${techniquePeriodMismatch.expected} table used by the application.`,
+                    )}
                   </span>
                 </div>
                 {techniquePeriodMismatch.direction === "state-ahead" &&
                 decisionTools.canUndo ? (
                   <button type="button" onClick={decisionTools.onUndo}>
-                    Annuler le dernier concert
+                    {text(
+                      "Annuler le dernier concert",
+                      "Undo the last concert",
+                    )}
                   </button>
                 ) : null}
               </>
@@ -1619,7 +1825,7 @@ export default function SnapshotCompanionPanel({
         <div className="snapshot-run-cockpit">
           <ol
             className="snapshot-concert-timeline"
-            aria-label="Progression des concerts"
+            aria-label={text("Progression des concerts", "Concert progress")}
           >
             {decisionTools.concerts.map((item, index) => (
               <li
@@ -1641,7 +1847,7 @@ export default function SnapshotCompanionPanel({
             ))}
           </ol>
           <div className="snapshot-current-state">
-            <span>État courant</span>
+            <span>{text("État courant", "Current state")}</span>
             <strong>{decisionTools.concertLabel}</strong>
             <div>
               <small>
@@ -1655,7 +1861,7 @@ export default function SnapshotCompanionPanel({
                 </b>
               </small>
               <small>
-                Jauge <b>{decisionTools.gaugeSongs}/3</b>
+                {text("Jauge", "Gauge")} <b>{decisionTools.gaugeSongs}/3</b>
               </small>
               <small>
                 Total <b>{decisionTools.totalSongs}/18</b>
@@ -1669,7 +1875,7 @@ export default function SnapshotCompanionPanel({
               onClick={undoFromSnapshot}
               disabled={!decisionTools.canUndo}
             >
-              ↶ Annuler
+              ↶ {text("Annuler", "Undo")}
             </button>
             <button
               type="button"
@@ -1682,21 +1888,33 @@ export default function SnapshotCompanionPanel({
                   : decisionTools.advanceDisabledReason
               }
             >
-              <span>Concert joué</span>
+              <span>{text("Concert joué", "Concert played")}</span>
               <strong>
                 {decisionTools.nextConcertLabel
-                  ? `Continuer vers ${decisionTools.nextConcertLabel}`
-                  : "Grand Live · fin de run"}
+                  ? text(
+                      `Continuer vers ${decisionTools.nextConcertLabel}`,
+                      `Continue to ${decisionTools.nextConcertLabel}`,
+                    )
+                  : text("Grand Live · fin de run", "Grand Live · end of run")}
               </strong>
             </button>
             <small className={decisionTools.advanceWarning ? "warning" : ""}>
               {decisionTools.canAdvanceConcert
                 ? decisionTools.advanceWarning ||
                   (decisionTools.automaticCarryoverPage === "songs"
-                    ? "La page de songs visible sera portée automatiquement."
+                    ? text(
+                        "La page de songs visible sera portée automatiquement.",
+                        "The visible song page will be carried automatically.",
+                      )
                     : decisionTools.automaticCarryoverPage === "techniques"
-                      ? "La page de techniques visible sera portée automatiquement avec ses coûts actuels jusqu’au premier achat."
-                      : "Cap et +10 seront appliqués à la transition.")
+                      ? text(
+                          "La page de techniques visible sera portée automatiquement avec ses coûts actuels jusqu’au premier achat.",
+                          "The visible technique page will be carried automatically at its current costs until the first purchase.",
+                        )
+                      : text(
+                          "Cap et +10 seront appliqués à la transition.",
+                          "The cap and +10 will be applied at the transition.",
+                        ))
                 : decisionTools.advanceDisabledReason}
             </small>
           </div>
@@ -1705,8 +1923,11 @@ export default function SnapshotCompanionPanel({
         {tab === "live" && (
           <div className="snapshot-live-controls">
             <div className="snapshot-timing-control compact">
-              <span>Moment de la section</span>
-              <div role="group" aria-label="Moment de la section">
+              <span>{text("Moment de la section", "Section timing")}</span>
+              <div
+                role="group"
+                aria-label={text("Moment de la section", "Section timing")}
+              >
                 <button
                   type="button"
                   className={
@@ -1716,8 +1937,13 @@ export default function SnapshotCompanionPanel({
                     decisionTools.onTimingModeChange("section-open")
                   }
                 >
-                  <strong>Milieu</strong>
-                  <small>Des gains restent possibles</small>
+                  <strong>{text("Milieu", "Mid-section")}</strong>
+                  <small>
+                    {text(
+                      "Des gains restent possibles",
+                      "Further gains are possible",
+                    )}
+                  </small>
                 </button>
                 <button
                   type="button"
@@ -1728,8 +1954,13 @@ export default function SnapshotCompanionPanel({
                     decisionTools.onTimingModeChange("deadline-now")
                   }
                 >
-                  <strong>Fin</strong>
-                  <small>Plus aucun gain avant live</small>
+                  <strong>{text("Fin", "End")}</strong>
+                  <small>
+                    {text(
+                      "Plus aucun gain avant live",
+                      "No further gains before live",
+                    )}
+                  </small>
                 </button>
               </div>
             </div>
@@ -1742,7 +1973,12 @@ export default function SnapshotCompanionPanel({
                     decisionTools.onDynamicSpendingChange(event.target.checked)
                   }
                 />
-                <span>Déduire les achats confirmés</span>
+                <span>
+                  {text(
+                    "Déduire les achats confirmés",
+                    "Deduct confirmed purchases",
+                  )}
+                </span>
               </label>
               <label
                 className={`snapshot-spending-toggle override ${decisionTools.forcePushOverride ? "active" : ""}`}
@@ -1756,7 +1992,9 @@ export default function SnapshotCompanionPanel({
                     )
                   }
                 />
-                <span>Push forcé / override</span>
+                <span>
+                  {text("Push forcé / override", "Forced push / override")}
+                </span>
               </label>
             </div>
             <details className="snapshot-policy-control compact">
@@ -1767,7 +2005,7 @@ export default function SnapshotCompanionPanel({
               <div
                 className="snapshot-mode-tabs"
                 role="group"
-                aria-label="Mode du solveur"
+                aria-label={text("Mode du solveur", "Solver mode")}
               >
                 <button
                   type="button"
@@ -1791,7 +2029,7 @@ export default function SnapshotCompanionPanel({
               {decisionTools.solverMode === "expert" && (
                 <div className="snapshot-policy-fields">
                   <label>
-                    <span>Risque</span>
+                    <span>{text("Risque", "Risk")}</span>
                     <select
                       value={decisionTools.riskProfile}
                       onChange={(event) =>
@@ -1800,7 +2038,7 @@ export default function SnapshotCompanionPanel({
                         )
                       }
                     >
-                      {Object.entries(SNAPSHOT_RISK_LABELS).map(
+                      {Object.entries(snapshotRiskLabels(language)).map(
                         ([value, label]) => (
                           <option key={value} value={value}>
                             {label}
@@ -1810,7 +2048,7 @@ export default function SnapshotCompanionPanel({
                     </select>
                   </label>
                   <label>
-                    <span>Génération</span>
+                    <span>{text("Génération", "Generation")}</span>
                     <select
                       value={decisionTools.generationProfile}
                       onChange={(event) =>
@@ -1819,7 +2057,7 @@ export default function SnapshotCompanionPanel({
                         )
                       }
                     >
-                      {Object.entries(SNAPSHOT_GENERATION_LABELS).map(
+                      {Object.entries(snapshotGenerationLabels(language)).map(
                         ([value, label]) => (
                           <option key={value} value={value}>
                             {label}
@@ -1830,7 +2068,7 @@ export default function SnapshotCompanionPanel({
                   </label>
                   {resolvedPage === "techniques" && (
                     <label>
-                      <span>Objectif</span>
+                      <span>{text("Objectif", "Objective")}</span>
                       <select
                         value={decisionTools.analysisObjective}
                         onChange={(event) =>
@@ -1839,7 +2077,7 @@ export default function SnapshotCompanionPanel({
                           )
                         }
                       >
-                        {Object.entries(SNAPSHOT_OBJECTIVE_LABELS).map(
+                        {Object.entries(snapshotObjectiveLabels(language)).map(
                           ([value, label]) => (
                             <option key={value} value={value}>
                               {label}
@@ -1859,12 +2097,12 @@ export default function SnapshotCompanionPanel({
             >
               <span>
                 {decision.loading
-                  ? "Analyse en cours…"
+                  ? text("Analyse en cours…", "Analysis in progress…")
                   : decision.stale
-                    ? "Aucune analyse active"
-                    : "Comprendre le choix"}
+                    ? text("Aucune analyse active", "No active analysis")
+                    : text("Comprendre le choix", "Understand the choice")}
               </span>
-              <strong>Voir les détails →</strong>
+              <strong>{text("Voir les détails →", "View details →")}</strong>
             </button>
           </div>
         )}
@@ -1874,11 +2112,11 @@ export default function SnapshotCompanionPanel({
             <div className="snapshot-preview-panel">
               <div className="snapshot-section-heading">
                 <div>
-                  <span>Capture courante</span>
+                  <span>{text("Capture courante", "Current capture")}</span>
                   <strong>
                     {frame
                       ? `${frame.imageWidth}×${frame.imageHeight}`
-                      : "En attente"}
+                      : text("En attente", "Waiting")}
                   </strong>
                 </div>
                 {profile.automation.overlayEnabled && (
@@ -1890,7 +2128,7 @@ export default function SnapshotCompanionPanel({
                       void hideOverlay();
                     }}
                   >
-                    Masquer maintenant
+                    {text("Masquer maintenant", "Hide now")}
                   </button>
                 )}
               </div>
@@ -1910,7 +2148,10 @@ export default function SnapshotCompanionPanel({
                           }
                     }
                   >
-                    <img src={frame.dataUrl} alt="Snapshot du jeu" />
+                    <img
+                      src={frame.dataUrl}
+                      alt={text("Snapshot du jeu", "Game snapshot")}
+                    />
                     {(
                       Object.values(profile.regions.tokens) as NormalizedRect[]
                     ).map((rect, index) => (
@@ -1937,29 +2178,33 @@ export default function SnapshotCompanionPanel({
               ) : (
                 <div className="snapshot-empty-preview">
                   <span>◎</span>
-                  <strong>Aucun snapshot</strong>
+                  <strong>{text("Aucun snapshot", "No snapshot")}</strong>
                   <p>
-                    Affiche Lessons dans le jeu puis utilise le bouton ou la
-                    hotkey globale.
+                    {text(
+                      "Affiche Lessons dans le jeu puis utilise le bouton ou la hotkey globale.",
+                      "Open Lessons in the game, then use the button or global hotkey.",
+                    )}
                   </p>
                 </div>
               )}
               <div className="snapshot-read-summary">
                 <span>
-                  Tokens prêts <strong>{draftTokenCount}/5</strong>
+                  {text("Tokens prêts", "Tokens ready")}{" "}
+                  <strong>{draftTokenCount}/5</strong>
                 </span>
                 <span>
-                  Lus sans correction <strong>{tokenReadCount}/5</strong>
+                  {text("Lus sans correction", "Read without correction")}{" "}
+                  <strong>{tokenReadCount}/5</strong>
                 </span>
                 <span>
-                  Offres{" "}
+                  {text("Offres", "Offers")}{" "}
                   <strong>
                     {recognizedOfferCount}/
                     {resolvedPage === "songs" ? expectedSongCount : 3}
                   </strong>
                 </span>
                 <span>
-                  Mode{" "}
+                  {text("Mode", "Mode")}{" "}
                   <strong>
                     {resolvedPage === "techniques" ? "Techniques" : "Songs"}
                   </strong>
@@ -1970,8 +2215,13 @@ export default function SnapshotCompanionPanel({
             <div className="snapshot-review-panel">
               <div className="snapshot-section-heading">
                 <div>
-                  <span>Validation rapide</span>
-                  <strong>Corrige seulement ce qui est faux</strong>
+                  <span>{text("Validation rapide", "Quick validation")}</span>
+                  <strong>
+                    {text(
+                      "Corrige seulement ce qui est faux",
+                      "Correct only what is wrong",
+                    )}
+                  </strong>
                 </div>
                 {snapshot && (
                   <span
@@ -1979,7 +2229,7 @@ export default function SnapshotCompanionPanel({
                       snapshot.pageConfidence,
                     )}`}
                   >
-                    {confidenceLabel(snapshot.pageConfidence)}
+                    {confidenceLabel(snapshot.pageConfidence, language)}
                   </span>
                 )}
               </div>
@@ -2016,14 +2266,20 @@ export default function SnapshotCompanionPanel({
                         >
                           {reading?.ambiguity
                             ? ambiguityResolved
-                              ? "Confirmé manuellement"
-                              : "Conflit 0 / 6 / 9"
-                            : confidenceLabel(reading?.confidence ?? 0)}
+                              ? text(
+                                  "Confirmé manuellement",
+                                  "Manually confirmed",
+                                )
+                              : text("Conflit 0 / 6 / 9", "0 / 6 / 9 conflict")
+                            : confidenceLabel(
+                                reading?.confidence ?? 0,
+                                language,
+                              )}
                         </small>
                       </label>
                       {reading?.ambiguity && !ambiguityResolved && (
                         <div className="snapshot-digit-suggestions">
-                          <span>Choisir</span>
+                          <span>{text("Choisir", "Choose")}</span>
                           {reading.alternatives?.map((value) => (
                             <button
                               type="button"
@@ -2045,7 +2301,8 @@ export default function SnapshotCompanionPanel({
                           reading.confidence <
                             profile.ocr.minTokenConfidence) && (
                           <em className="snapshot-token-diagnostic">
-                            OCR « {reading.raw || "—"} » · {reading.diagnostic}
+                            OCR “{reading.raw || "—"}” ·{" "}
+                            {runtimeText(reading.diagnostic)}
                           </em>
                         )}
                     </div>
@@ -2057,15 +2314,34 @@ export default function SnapshotCompanionPanel({
                 dismissedStockContinuity !== stockContinuity.fingerprint && (
                   <div className="snapshot-stock-continuity" role="status">
                     <div>
-                      <strong>Variation de stock inhabituelle</strong>
-                      <span>{stockContinuityWarningText(stockContinuity)}</span>
+                      <strong>
+                        {text(
+                          "Variation de stock inhabituelle",
+                          "Unusual stock change",
+                        )}
+                      </strong>
+                      <span>
+                        {stockContinuityWarningText(stockContinuity, language)}
+                      </span>
                       <small>
                         {stockContinuity.broadStateDrift
-                          ? "Plusieurs couleurs ont changé : c’est probablement normal si tu as joué plusieurs tours ou modifié la run hors OCR."
+                          ? text(
+                              "Plusieurs couleurs ont changé : c’est probablement normal si tu as joué plusieurs tours ou modifié la run hors OCR.",
+                              "Several colours changed: this is probably normal if you played several turns or changed the run outside OCR.",
+                            )
                           : stockContinuity.strongOcrSignal
-                            ? "Une troncature OCR est plausible. Corrige uniquement le chiffre concerné si la variation n’est pas volontaire."
-                            : "Cela peut être normal après des achats, des gains de tokens ou une saisie manuelle hors OCR."}{" "}
-                        La validation reste autorisée.
+                            ? text(
+                                "Une troncature OCR est plausible. Corrige uniquement le chiffre concerné si la variation n’est pas volontaire.",
+                                "OCR truncation is plausible. Correct only the affected number if the change was not intentional.",
+                              )
+                            : text(
+                                "Cela peut être normal après des achats, des gains de tokens ou une saisie manuelle hors OCR.",
+                                "This may be normal after purchases, token gains or manual input outside OCR.",
+                              )}{" "}
+                        {text(
+                          "La validation reste autorisée.",
+                          "Validation remains available.",
+                        )}
                       </small>
                     </div>
                     <button
@@ -2074,7 +2350,7 @@ export default function SnapshotCompanionPanel({
                         setDismissedStockContinuity(stockContinuity.fingerprint)
                       }
                     >
-                      C’est volontaire
+                      {text("C’est volontaire", "Intentional")}
                     </button>
                   </div>
                 )}
@@ -2124,11 +2400,14 @@ export default function SnapshotCompanionPanel({
                         <div>
                           <span className="snapshot-slot">{slot + 1}</span>
                           <span>
-                            <strong>{techniqueLabel(cost)}</strong>
+                            <strong>{techniqueLabel(cost, language)}</strong>
                             <small>
                               {plausible
-                                ? "Vecteur cohérent"
-                                : "Vérifie les chiffres"}
+                                ? text("Vecteur cohérent", "Consistent vector")
+                                : text(
+                                    "Vérifie les chiffres",
+                                    "Review the numbers",
+                                  )}
                             </small>
                           </span>
                           <em
@@ -2166,19 +2445,37 @@ export default function SnapshotCompanionPanel({
                           <span>
                             {blocking
                               ? recommended
-                                ? `Moins mauvais choix · BLOQUANT · ${diagnostic?.reason ?? "contrainte perdue"}`
-                                : `Bloquant · ${diagnostic?.reason ?? "contrainte perdue"}`
+                                ? text(
+                                    `Moins mauvais choix · BLOQUANT · ${diagnostic?.reason ?? "contrainte perdue"}`,
+                                    `Least bad choice · BLOCKING · ${diagnostic?.reason ?? "constraint lost"}`,
+                                  )
+                                : text(
+                                    `Bloquant · ${diagnostic?.reason ?? "contrainte perdue"}`,
+                                    `Blocking · ${diagnostic?.reason ?? "constraint lost"}`,
+                                  )
                               : recommended
                                 ? decision.overrideActive
-                                  ? "Override · meilleur push non bloquant"
-                                  : "Choix recommandé"
+                                  ? text(
+                                      "Override · meilleur push non bloquant",
+                                      "Override · best non-blocking push",
+                                    )
+                                  : text(
+                                      "Choix recommandé",
+                                      "Recommended choice",
+                                    )
                                 : alternative
-                                  ? "Alternative sûre"
+                                  ? text("Alternative sûre", "Safe alternative")
                                   : !affordable
-                                    ? "Tokens insuffisants"
+                                    ? text(
+                                        "Tokens insuffisants",
+                                        "Insufficient tokens",
+                                      )
                                     : purchaseReady
-                                      ? "Second choix"
-                                      : "Applique le snapshot d’abord"}
+                                      ? text("Second choix", "Second choice")
+                                      : text(
+                                          "Applique le snapshot d’abord",
+                                          "Apply the snapshot first",
+                                        )}
                           </span>
                           <button
                             type="button"
@@ -2198,7 +2495,7 @@ export default function SnapshotCompanionPanel({
                             }
                             onClick={() => confirmTechniquePurchase(slot)}
                           >
-                            J’ai acheté
+                            {text("J’ai acheté", "I bought it")}
                           </button>
                         </div>
                       </article>
@@ -2254,7 +2551,9 @@ export default function SnapshotCompanionPanel({
                           <span className="snapshot-song-placeholder">?</span>
                         )}
                         <label>
-                          <span>Song reconnue</span>
+                          <span>
+                            {text("Song reconnue", "Recognised song")}
+                          </span>
                           <select
                             value={draftSongs[slot] ?? ""}
                             onChange={(event) =>
@@ -2267,7 +2566,9 @@ export default function SnapshotCompanionPanel({
                               )
                             }
                           >
-                            <option value="">À sélectionner…</option>
+                            <option value="">
+                              {text("À sélectionner…", "Select…")}
+                            </option>
                             {context.songs.map((song) => (
                               <option
                                 value={song.id}
@@ -2280,14 +2581,18 @@ export default function SnapshotCompanionPanel({
                                 {song.name}
                                 {availableSongSet.has(song.id)
                                   ? ""
-                                  : " · hors pool courante"}
+                                  : text(
+                                      " · hors pool courante",
+                                      " · outside current pool",
+                                    )}
                               </option>
                             ))}
                           </select>
                           <small>
-                            OCR « {reading?.rawTitle || "—"} » · titre{" "}
+                            OCR “{reading?.rawTitle || "—"}” ·{" "}
+                            {text("titre", "title")}{" "}
                             {Math.round((reading?.titleScore ?? 0) * 100)}% ·
-                            pochette{" "}
+                            {text("pochette", "cover")}{" "}
                             {Math.round((reading?.coverScore ?? 0) * 100)}%
                           </small>
                           {blocking && diagnostic?.reason && (
@@ -2318,17 +2623,35 @@ export default function SnapshotCompanionPanel({
                         >
                           {blocking
                             ? recommended
-                              ? "J’ai acheté · moins mauvais choix bloquant"
-                              : "J’ai acheté malgré le blocage"
+                              ? text(
+                                  "J’ai acheté · moins mauvais choix bloquant",
+                                  "I bought it · least bad blocking choice",
+                                )
+                              : text(
+                                  "J’ai acheté malgré le blocage",
+                                  "I bought it despite the block",
+                                )
                             : recommended
                               ? decision.overrideActive
-                                ? "J’ai acheté · override"
-                                : "J’ai acheté · recommandé"
+                                ? text(
+                                    "J’ai acheté · override",
+                                    "I bought it · override",
+                                  )
+                                : text(
+                                    "J’ai acheté · recommandé",
+                                    "I bought it · recommended",
+                                  )
                               : alternative
-                                ? "J’ai acheté · alternative sûre"
+                                ? text(
+                                    "J’ai acheté · alternative sûre",
+                                    "I bought it · safe alternative",
+                                  )
                                 : !songAffordable
-                                  ? "Tokens insuffisants"
-                                  : "J’ai acheté"}
+                                  ? text(
+                                      "Tokens insuffisants",
+                                      "Insufficient tokens",
+                                    )
+                                  : text("J’ai acheté", "I bought it")}
                         </button>
                       </article>
                     );
@@ -2341,18 +2664,33 @@ export default function SnapshotCompanionPanel({
                   <strong>
                     {snapshot && !resultReady
                       ? !techniqueVectorsValid
-                        ? "Au moins un coût de technique est incomplet ou impossible pour cette période."
-                        : `Complète les 5 tokens et les ${requiredOfferCount} offres avant l’analyse.`
+                        ? text(
+                            "Au moins un coût de technique est incomplet ou impossible pour cette période.",
+                            "At least one technique cost is incomplete or impossible for this period.",
+                          )
+                        : text(
+                            `Complète les 5 tokens et les ${requiredOfferCount} offres avant l’analyse.`,
+                            `Complete all 5 tokens and ${requiredOfferCount} offers before analysis.`,
+                          )
                       : decision.loading
-                        ? "Analyse en cours…"
+                        ? text("Analyse en cours…", "Analysis in progress…")
                         : decision.stale
-                          ? "Recommandation en attente"
+                          ? text(
+                              "Recommandation en attente",
+                              "Recommendation pending",
+                            )
                           : decision.headline || decision.summary}
                   </strong>
                   <small>
                     {profile.automation.overlayEnabled
-                      ? "Le meilleur choix sera entouré sur le jeu pendant 30 secondes."
-                      : "Overlay désactivé dans les réglages."}
+                      ? text(
+                          "Le meilleur choix sera entouré sur le jeu pendant 30 secondes.",
+                          "The best choice will be highlighted on the game for 30 seconds.",
+                        )
+                      : text(
+                          "Overlay désactivé dans les réglages.",
+                          "Overlay disabled in settings.",
+                        )}
                   </small>
                 </div>
                 <div className="snapshot-apply-actions">
@@ -2362,7 +2700,7 @@ export default function SnapshotCompanionPanel({
                     onClick={() => setTab("decision")}
                     disabled={decision.stale || decision.loading}
                   >
-                    Voir les détails
+                    {text("Voir les détails", "View details")}
                   </button>
                   <button
                     type="button"
@@ -2370,8 +2708,13 @@ export default function SnapshotCompanionPanel({
                     onClick={applySnapshot}
                     disabled={!snapshot || !resultReady || busy}
                   >
-                    Valider et analyser
-                    <small>Met à jour la décision sans fermer</small>
+                    {text("Valider et analyser", "Validate and analyse")}
+                    <small>
+                      {text(
+                        "Met à jour la décision sans fermer",
+                        "Updates the decision without closing",
+                      )}
+                    </small>
                   </button>
                 </div>
               </div>
@@ -2398,22 +2741,35 @@ export default function SnapshotCompanionPanel({
               <div>
                 <span>
                   {decision.loading
-                    ? "Solveur en cours"
+                    ? text("Solveur en cours", "Solver running")
                     : decision.stale
-                      ? "Analyse en attente"
+                      ? text("Analyse en attente", "Analysis pending")
                       : decision.overrideActive
-                        ? "Override actif"
+                        ? text("Override actif", "Override active")
                         : decision.warning
-                          ? "Décision sous contrainte"
-                          : "Décision recommandée"}
+                          ? text(
+                              "Décision sous contrainte",
+                              "Constrained decision",
+                            )
+                          : text(
+                              "Décision recommandée",
+                              "Recommended decision",
+                            )}
                 </span>
                 <h3>{decision.headline}</h3>
                 <p>{decision.summary}</p>
                 {decision.warning && <em>{decision.warning}</em>}
               </div>
               <button type="button" onClick={() => setTab("live")}>
-                {decision.stale ? "Prendre un snapshot" : "Retour au live"}
-                <small>Capture et confirmation des achats</small>
+                {decision.stale
+                  ? text("Prendre un snapshot", "Take a snapshot")
+                  : text("Retour au live", "Back to live")}
+                <small>
+                  {text(
+                    "Capture et confirmation des achats",
+                    "Capture and purchase confirmation",
+                  )}
+                </small>
               </button>
             </section>
 
@@ -2421,18 +2777,23 @@ export default function SnapshotCompanionPanel({
               <>
                 <div className="snapshot-decision-summary-grid">
                   <section className="snapshot-decision-plan">
-                    <span>Plan actif</span>
+                    <span>{text("Plan actif", "Active plan")}</span>
                     <strong>
-                      {decision.plan?.label ?? "Plan déterministe"}
+                      {decision.plan?.label ??
+                        text("Plan déterministe", "Deterministic plan")}
                     </strong>
                     <p>{decision.plan?.detail ?? decision.summary}</p>
                     {decision.plan?.fallback && (
-                      <small>Repli · {decision.plan.fallback}</small>
+                      <small>
+                        {text("Repli", "Fallback")} · {decision.plan.fallback}
+                      </small>
                     )}
                   </section>
 
                   <section className="snapshot-decision-metrics">
-                    <span>Indicateurs décisifs</span>
+                    <span>
+                      {text("Indicateurs décisifs", "Decisive metrics")}
+                    </span>
                     <div>
                       {decision.metrics.map((metric) => (
                         <article
@@ -2448,7 +2809,7 @@ export default function SnapshotCompanionPanel({
                   </section>
 
                   <section className="snapshot-decision-reasons">
-                    <span>Pourquoi</span>
+                    <span>{text("Pourquoi", "Why")}</span>
                     <ul>
                       {decision.reasons.map((reason) => (
                         <li key={reason}>{reason}</li>
@@ -2457,7 +2818,7 @@ export default function SnapshotCompanionPanel({
                   </section>
 
                   <section className="snapshot-decision-path">
-                    <span>Chemin retenu</span>
+                    <span>{text("Chemin retenu", "Selected path")}</span>
                     <ol>
                       {decision.path.map((step) => (
                         <li key={step}>{step}</li>
@@ -2469,11 +2830,19 @@ export default function SnapshotCompanionPanel({
                 <section className="snapshot-candidate-comparison">
                   <div className="snapshot-section-heading">
                     <div>
-                      <span>Comparaison complète</span>
-                      <strong>Choix visibles et option de conservation</strong>
+                      <span>
+                        {text("Comparaison complète", "Full comparison")}
+                      </span>
+                      <strong>
+                        {text(
+                          "Choix visibles et option de conservation",
+                          "Visible choices and hold option",
+                        )}
+                      </strong>
                     </div>
                     <small>
-                      {decision.candidates.length} politique(s) comparée(s)
+                      {decision.candidates.length}{" "}
+                      {text("politique(s) comparée(s)", "policies compared")}
                     </small>
                   </div>
                   <div className="snapshot-candidate-grid">
@@ -2485,12 +2854,12 @@ export default function SnapshotCompanionPanel({
                         <header>
                           <span>
                             {candidate.recommended
-                              ? "Recommandée"
+                              ? text("Recommandée", "Recommended")
                               : candidate.safety === "safe-alternative"
-                                ? "Alternative sûre"
+                                ? text("Alternative sûre", "Safe alternative")
                                 : candidate.safety === "hard-blocking"
-                                  ? "Bloquante"
-                                  : "Secondaire"}
+                                  ? text("Bloquante", "Blocking")
+                                  : text("Secondaire", "Secondary")}
                           </span>
                           <strong>{candidate.label}</strong>
                           <small>{candidate.action}</small>
@@ -2524,11 +2893,16 @@ export default function SnapshotCompanionPanel({
 
             <section className="snapshot-decision-diagnostics">
               <div>
-                <span>Pipeline du dernier snapshot</span>
+                <span>
+                  {text(
+                    "Pipeline du dernier snapshot",
+                    "Latest snapshot pipeline",
+                  )}
+                </span>
                 {decisionTools.pipelineTimings ? (
                   <div>
                     <small>
-                      Capture{" "}
+                      {text("Capture", "Capture")}{" "}
                       <strong>
                         {Math.round(
                           decisionTools.pipelineTimings.captureMs ?? 0,
@@ -2537,7 +2911,7 @@ export default function SnapshotCompanionPanel({
                       </strong>
                     </small>
                     <small>
-                      OCR principal{" "}
+                      {text("OCR principal", "Main OCR")}{" "}
                       <strong>
                         {Math.round(
                           decisionTools.pipelineTimings.ocrPrimaryMs ?? 0,
@@ -2546,7 +2920,7 @@ export default function SnapshotCompanionPanel({
                       </strong>
                     </small>
                     <small>
-                      Consensus chiffres{" "}
+                      {text("Consensus chiffres", "Numeric consensus")}{" "}
                       <strong>
                         {Math.round(
                           decisionTools.pipelineTimings.ocrRetryMs ?? 0,
@@ -2573,14 +2947,18 @@ export default function SnapshotCompanionPanel({
                   </div>
                 ) : (
                   <small>
-                    Les durées apparaîtront après le prochain snapshot.
+                    {text(
+                      "Les durées apparaîtront après le prochain snapshot.",
+                      "Timings will appear after the next snapshot.",
+                    )}
                   </small>
                 )}
               </div>
               <p>
-                Les détails restent disponibles ici après l’analyse ; il n’est
-                plus nécessaire de fermer l’interface OCR pour consulter le
-                plan, les probabilités ou les alternatives.
+                {text(
+                  "Les détails restent disponibles ici après l’analyse ; il n’est plus nécessaire de fermer l’interface OCR pour consulter le plan, les probabilités ou les alternatives.",
+                  "Details remain available here after analysis; you no longer need to close the OCR interface to view the plan, probabilities or alternatives.",
+                )}
               </p>
             </section>
           </div>
@@ -2591,8 +2969,13 @@ export default function SnapshotCompanionPanel({
             <aside>
               <div className="snapshot-section-heading">
                 <div>
-                  <span>Toutes les zones OCR</span>
-                  <strong>Tokens, textes, coûts et songs</strong>
+                  <span>{text("Toutes les zones OCR", "All OCR regions")}</span>
+                  <strong>
+                    {text(
+                      "Tokens, textes, coûts et songs",
+                      "Tokens, text, costs and songs",
+                    )}
+                  </strong>
                 </div>
               </div>
               {CALIBRATION_GROUPS.map((group) => (
@@ -2618,7 +3001,11 @@ export default function SnapshotCompanionPanel({
                         }}
                         key={target.id}
                       >
-                        {target.label}
+                        {calibrationTargetLabel(
+                          language,
+                          target.id,
+                          target.label,
+                        )}
                       </button>
                     ))}
                 </div>
@@ -2628,9 +3015,18 @@ export default function SnapshotCompanionPanel({
             <div className="snapshot-calibration-workspace">
               <div className="snapshot-calibration-toolbar">
                 <span>
-                  <strong>{activeCalibrationTarget.label}</strong>
+                  <strong>
+                    {calibrationTargetLabel(
+                      language,
+                      activeCalibrationTarget.id,
+                      activeCalibrationTarget.label,
+                    )}
+                  </strong>
                   <small>
-                    Trace un rectangle directement sur le screenshot.
+                    {text(
+                      "Trace un rectangle directement sur le screenshot.",
+                      "Draw a rectangle directly on the screenshot.",
+                    )}
                   </small>
                 </span>
                 <button
@@ -2650,7 +3046,7 @@ export default function SnapshotCompanionPanel({
                   onChange={(event) =>
                     setPreviewZoom(Number(event.target.value))
                   }
-                  aria-label="Zoom de calibration"
+                  aria-label={text("Zoom de calibration", "Calibration zoom")}
                 />
                 <button
                   type="button"
@@ -2661,7 +3057,7 @@ export default function SnapshotCompanionPanel({
                   +
                 </button>
                 <button type="button" onClick={fitCalibration}>
-                  Ajuster
+                  {text("Ajuster", "Fit")}
                 </button>
                 <strong>{Math.round(previewZoom * 100)} %</strong>
               </div>
@@ -2697,7 +3093,7 @@ export default function SnapshotCompanionPanel({
                   >
                     <img
                       src={frame.dataUrl}
-                      alt="Calibration OCR"
+                      alt={text("Calibration OCR", "OCR calibration")}
                       ref={calibrationImageRef}
                       draggable={false}
                     />
@@ -2705,16 +3101,24 @@ export default function SnapshotCompanionPanel({
                       className="snapshot-calibration-selection"
                       style={rectToCss(activeCalibrationRect)}
                     >
-                      {activeCalibrationTarget.label}
+                      {calibrationTargetLabel(
+                        language,
+                        activeCalibrationTarget.id,
+                        activeCalibrationTarget.label,
+                      )}
                     </span>
                   </div>
                 ) : (
                   <div className="snapshot-empty-preview">
                     <span>⌗</span>
-                    <strong>Capture requise</strong>
+                    <strong>
+                      {text("Capture requise", "Capture required")}
+                    </strong>
                     <p>
-                      Prends d’abord un snapshot Techniques ou Songs. La même
-                      image servira à placer toutes les zones.
+                      {text(
+                        "Prends d’abord un snapshot Techniques ou Songs. La même image servira à placer toutes les zones.",
+                        "First take a Techniques or Songs snapshot. The same image will be used to position every region.",
+                      )}
                     </p>
                   </div>
                 )}
@@ -2723,17 +3127,24 @@ export default function SnapshotCompanionPanel({
               {activeCalibrationIsNumeric && (
                 <div className="snapshot-calibration-learning">
                   <div>
-                    <span>Calibrage assisté</span>
-                    <strong>Indique la valeur réellement affichée</strong>
+                    <span>
+                      {text("Calibrage assisté", "Assisted calibration")}
+                    </span>
+                    <strong>
+                      {text(
+                        "Indique la valeur réellement affichée",
+                        "Enter the value actually displayed",
+                      )}
+                    </strong>
                     <p>
-                      La couleur sert à relocaliser les glyphes dans la zone
-                      logique à chaque capture. La confirmation ajoute des
-                      modèles de chiffres sans déplacer la zone ni remplacer les
-                      exemples précédents.
+                      {text(
+                        "La couleur sert à relocaliser les glyphes dans la zone logique à chaque capture. La confirmation ajoute des modèles de chiffres sans déplacer la zone ni remplacer les exemples précédents.",
+                        "Colour is used to relocate glyphs inside the logical region on every capture. Confirmation adds digit models without moving the region or replacing previous examples.",
+                      )}
                     </p>
                   </div>
                   <label>
-                    <span>Valeur réelle</span>
+                    <span>{text("Valeur réelle", "Actual value")}</span>
                     <input
                       type="number"
                       min="0"
@@ -2758,23 +3169,31 @@ export default function SnapshotCompanionPanel({
                       calibrationExpected.trim() === ""
                     }
                   >
-                    {calibrationLearning ? "Analyse…" : "Ajouter cet exemple"}
+                    {calibrationLearning
+                      ? text("Analyse…", "Analysing…")
+                      : text("Ajouter cet exemple", "Add this example")}
                   </button>
                   {activeCalibrationTuning?.ink && (
                     <div className="snapshot-calibration-learned">
                       <small>
-                        Apprentissage actif ·{" "}
+                        {text("Apprentissage actif", "Learning active")} ·{" "}
                         {activeCalibrationTuning.verifiedSamples}{" "}
-                        confirmation(s) · dernière valeur{" "}
+                        {text(
+                          "confirmation(s) · dernière valeur",
+                          "confirmation(s) · latest value",
+                        )}{" "}
                         {activeCalibrationTuning.lastExpected} ·{" "}
                         {
                           Object.keys(activeCalibrationTuning.templates ?? {})
                             .length
                         }
-                        /10 chiffres couverts.
+                        /10 {text("chiffres couverts.", "digits covered.")}
                       </small>
                       <button type="button" onClick={forgetNumericCalibration}>
-                        Oublier cet apprentissage
+                        {text(
+                          "Oublier cet apprentissage",
+                          "Clear this learning",
+                        )}
                       </button>
                     </div>
                   )}
@@ -2787,13 +3206,14 @@ export default function SnapshotCompanionPanel({
               )}
 
               <div className="snapshot-calibration-help">
-                <span>Ce qui est attendu</span>
+                <span>{text("Ce qui est attendu", "Expected region")}</span>
                 <strong>{help.title}</strong>
                 <p>{help.body}</p>
                 <small>
-                  Les coordonnées sont normalisées : elles restent valides
-                  lorsque la fenêtre change de taille sans changer de ratio
-                  interne.
+                  {text(
+                    "Les coordonnées sont normalisées : elles restent valides lorsque la fenêtre change de taille sans changer de ratio interne.",
+                    "Coordinates are normalised: they remain valid when the window is resized without changing its internal aspect ratio.",
+                  )}
                 </small>
               </div>
             </div>
@@ -2805,12 +3225,12 @@ export default function SnapshotCompanionPanel({
             <section>
               <div className="snapshot-section-heading">
                 <div>
-                  <span>Utilisation</span>
-                  <strong>Snapshot manuel</strong>
+                  <span>{text("Utilisation", "Usage")}</span>
+                  <strong>{text("Snapshot manuel", "Manual snapshot")}</strong>
                 </div>
               </div>
               <label>
-                <span>Hotkey globale</span>
+                <span>{text("Hotkey globale", "Global hotkey")}</span>
                 <input
                   type="text"
                   value={profile.capture.hotkey}
@@ -2821,11 +3241,14 @@ export default function SnapshotCompanionPanel({
                   }
                 />
                 <small>
-                  Format Tauri, par exemple CommandOrControl+Shift+Space.
+                  {text(
+                    "Format Tauri, par exemple CommandOrControl+Shift+Space.",
+                    "Tauri format, for example CommandOrControl+Shift+Space.",
+                  )}
                 </small>
               </label>
               <label>
-                <span>Fenêtre recherchée</span>
+                <span>{text("Fenêtre recherchée", "Window pattern")}</span>
                 <input
                   type="text"
                   value={profile.windowTitlePattern}
@@ -2835,7 +3258,12 @@ export default function SnapshotCompanionPanel({
                     })
                   }
                 />
-                <small>Expression régulière insensible à la casse.</small>
+                <small>
+                  {text(
+                    "Expression régulière insensible à la casse.",
+                    "Case-insensitive regular expression.",
+                  )}
+                </small>
               </label>
               <label className="snapshot-toggle">
                 <input
@@ -2848,10 +3276,17 @@ export default function SnapshotCompanionPanel({
                   }
                 />
                 <span>
-                  <strong>Overlay de recommandation</strong>
+                  <strong>
+                    {text(
+                      "Overlay de recommandation",
+                      "Recommendation overlay",
+                    )}
+                  </strong>
                   <small>
-                    Fenêtre transparente, always-on-top et traversable par les
-                    clics.
+                    {text(
+                      "Fenêtre transparente, always-on-top et traversable par les clics.",
+                      "Transparent, always-on-top window that ignores clicks.",
+                    )}
                   </small>
                 </span>
               </label>
@@ -2860,12 +3295,15 @@ export default function SnapshotCompanionPanel({
             <section>
               <div className="snapshot-section-heading">
                 <div>
-                  <span>OCR ciblé</span>
-                  <strong>Qualité / coût</strong>
+                  <span>{text("OCR ciblé", "Targeted OCR")}</span>
+                  <strong>{text("Qualité / coût", "Quality / cost")}</strong>
                 </div>
               </div>
               <label>
-                <span>Échelle OCR · {profile.ocr.scale.toFixed(1)}×</span>
+                <span>
+                  {text("Échelle OCR", "OCR scale")} ·{" "}
+                  {profile.ocr.scale.toFixed(1)}×
+                </span>
                 <input
                   type="range"
                   min="1"
@@ -2879,12 +3317,15 @@ export default function SnapshotCompanionPanel({
                   }
                 />
                 <small>
-                  2,4× convient généralement à une fenêtre 2048×1152.
+                  {text(
+                    "2,4× convient généralement à une fenêtre 2048×1152.",
+                    "2.4× generally works well for a 2048×1152 window.",
+                  )}
                 </small>
               </label>
               <label>
                 <span>
-                  Seuil tokens ·{" "}
+                  {text("Seuil tokens", "Token threshold")} ·{" "}
                   {Math.round(profile.ocr.minTokenConfidence * 100)} %
                 </span>
                 <input
@@ -2902,7 +3343,7 @@ export default function SnapshotCompanionPanel({
               </label>
               <label>
                 <span>
-                  Seuil songs ·{" "}
+                  {text("Seuil songs", "Song threshold")} ·{" "}
                   {Math.round(profile.ocr.minSongConfidence * 100)} %
                 </span>
                 <input
@@ -2921,11 +3362,17 @@ export default function SnapshotCompanionPanel({
               <div className="snapshot-ocr-consensus-info">
                 <span>0 · 6 · 9</span>
                 <div>
-                  <strong>Consensus numérique renforcé</strong>
+                  <strong>
+                    {text(
+                      "Consensus numérique renforcé",
+                      "Enhanced numeric consensus",
+                    )}
+                  </strong>
                   <small>
-                    Lecture mot entier Otsu + brut, passes caractère pour les
-                    valeurs courtes et contrôle de la position du trou. Un
-                    conflit reste volontairement à confirmer.
+                    {text(
+                      "Lecture mot entier Otsu + brut, passes caractère pour les valeurs courtes et contrôle de la position du trou. Un conflit reste volontairement à confirmer.",
+                      "Whole-word Otsu and raw readings, character passes for short values and hole-position checks. Conflicts deliberately remain subject to confirmation.",
+                    )}
                   </small>
                 </div>
               </div>
@@ -2935,52 +3382,64 @@ export default function SnapshotCompanionPanel({
               <div className="snapshot-section-heading">
                 <div>
                   <span>Diagnostic</span>
-                  <strong>Journal des décisions</strong>
+                  <strong>
+                    {text("Journal des décisions", "Decision log")}
+                  </strong>
                 </div>
               </div>
               <p className="snapshot-log-path">
                 {decisionTools.decisionLogStatus
-                  ? `Fichier actif (${decisionTools.decisionLogStatus.storage === "portable" ? "près de l’exécutable" : "AppData"}) : ${decisionTools.decisionLogStatus.path}`
-                  : "Mode navigateur : journal local exportable en NDJSON."}
+                  ? text(
+                      `Fichier actif (${decisionTools.decisionLogStatus.storage === "portable" ? "près de l’exécutable" : "AppData"}) : ${decisionTools.decisionLogStatus.path}`,
+                      `Active file (${decisionTools.decisionLogStatus.storage === "portable" ? "next to the executable" : "AppData"}): ${decisionTools.decisionLogStatus.path}`,
+                    )
+                  : text(
+                      "Mode navigateur : journal local exportable en NDJSON.",
+                      "Browser mode: local log can be exported as NDJSON.",
+                    )}
               </p>
               {decisionTools.decisionLogStatus && (
                 <small>
                   {decisionTools.decisionLogStatus.sizeBytes.toLocaleString(
-                    "fr-FR",
+                    language === "fr" ? "fr-FR" : "en-GB",
                   )}{" "}
-                  octets · fichier créé dès le démarrage
+                  {text(
+                    "octets · fichier créé dès le démarrage",
+                    "bytes · file created at startup",
+                  )}
                 </small>
               )}
               {decisionTools.decisionLogError && (
                 <p className="snapshot-warning">
-                  Écriture du journal en échec :{" "}
+                  {text("Écriture du journal en échec", "Log write failed")}:{" "}
                   {decisionTools.decisionLogError}
                 </p>
               )}
               <small>
-                Chaque analyse écrit l’état, son hash stable, les candidats, les
-                raisons, la recommandation normale, l’override, les timings
-                détaillés et le choix confirmé dans une ligne liée.
+                {text(
+                  "Chaque analyse écrit l’état, son hash stable, les candidats, les raisons, la recommandation normale, l’override, les timings détaillés et le choix confirmé dans une ligne liée.",
+                  "Each analysis writes the state, its stable hash, candidates, reasons, normal recommendation, override, detailed timings and confirmed choice in a linked line.",
+                )}
               </small>
               <div className="snapshot-profile-actions">
                 <button
                   type="button"
                   onClick={decisionTools.onOpenDecisionLogDirectory}
                 >
-                  Ouvrir le dossier
+                  {text("Ouvrir le dossier", "Open folder")}
                 </button>
                 <button
                   type="button"
                   onClick={decisionTools.onExportDecisionLog}
                 >
-                  Exporter le log
+                  {text("Exporter le log", "Export log")}
                 </button>
                 <button
                   type="button"
                   className="danger"
                   onClick={decisionTools.onClearDecisionLog}
                 >
-                  Vider le log
+                  {text("Vider le log", "Clear log")}
                 </button>
               </div>
             </section>
@@ -2988,17 +3447,19 @@ export default function SnapshotCompanionPanel({
             <section>
               <div className="snapshot-section-heading">
                 <div>
-                  <span>Alignement overlay</span>
-                  <strong>Correction en pixels</strong>
+                  <span>{text("Alignement overlay", "Overlay alignment")}</span>
+                  <strong>
+                    {text("Correction en pixels", "Pixel correction")}
+                  </strong>
                 </div>
               </div>
               <div className="snapshot-geometry-grid">
                 {(
                   [
-                    ["offsetX", "Décalage X"],
-                    ["offsetY", "Décalage Y"],
-                    ["widthDelta", "Largeur ±"],
-                    ["heightDelta", "Hauteur ±"],
+                    ["offsetX", text("Décalage X", "X offset")],
+                    ["offsetY", text("Décalage Y", "Y offset")],
+                    ["widthDelta", text("Largeur ±", "Width ±")],
+                    ["heightDelta", text("Hauteur ±", "Height ±")],
                   ] as const
                 ).map(([key, label]) => (
                   <label key={key}>
@@ -3018,10 +3479,10 @@ export default function SnapshotCompanionPanel({
               </div>
               <div className="snapshot-profile-actions">
                 <button type="button" onClick={() => profileDownload(profile)}>
-                  Exporter le profil
+                  {text("Exporter le profil", "Export profile")}
                 </button>
                 <label>
-                  Importer un profil
+                  {text("Importer un profil", "Import profile")}
                   <input
                     type="file"
                     accept="application/json"
@@ -3037,10 +3498,12 @@ export default function SnapshotCompanionPanel({
                   onClick={() => {
                     const next = cloneVisionProfile(DEFAULT_VISION_PROFILE);
                     setProfile(next);
-                    setMessage("Profil OCR réinitialisé.");
+                    setMessage(
+                      text("Profil OCR réinitialisé.", "OCR profile reset."),
+                    );
                   }}
                 >
-                  Réinitialiser
+                  {text("Réinitialiser", "Reset")}
                 </button>
               </div>
             </section>

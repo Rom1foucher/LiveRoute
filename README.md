@@ -79,9 +79,10 @@ npm run build --workspace @glcp/desktop
 npm run build:desktop
 ```
 
-The V1 baseline contains **268 tests**: 186 core, 19 shared UI, and 63
-desktop/OCR tests. The browser bundle, desktop frontend, native Tauri build, and
-Windows NSIS installer have all been validated for v1.0.0.
+The v1.0.1 baseline contains **271 tests**: 186 core, 19 shared UI, and 66
+desktop/OCR tests. The browser and desktop frontends are validated locally;
+the native Tauri build and Windows NSIS installer are validated by the Windows
+workflow.
 
 ## GitHub distribution
 
@@ -95,11 +96,11 @@ The repository includes three workflows:
   publishes the NSIS installer when a `v*` tag is pushed.
 
 Enable **Settings → Pages → Source → GitHub Actions** after the first push. To
-publish the desktop V1 release:
+publish the v1.0.1 hotfix:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 ## Documentation

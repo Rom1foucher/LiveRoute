@@ -1,5 +1,15 @@
 # Release notes
 
+## v1.0.1 — OCR English and Tauri refresh — 2026-08-10
+
+- Fixed the desktop OCR cockpit so Live, Decision, Calibration, Settings,
+  progress messages, validation warnings, and OCR diagnostics follow the
+  application language.
+- Added desktop i18n regression coverage for runtime diagnostics and calibration
+  region labels.
+- Raised the Tauri JavaScript dependency floors to the versions already resolved
+  by the lockfile: CLI 2.11.4, API 2.11.1, and global-shortcut 2.3.2.
+
 ## v1.0.0 — Web and OCR desktop V1 — 2026-08-10
 
 - **One solver, two editions.** The browser and Tauri applications now share

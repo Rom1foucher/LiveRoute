@@ -1,6 +1,6 @@
 [package]
 name = "grand-live-carryover-planner-ocr"
-version = "1.0.0"
+version = "1.0.1"
 description = "Local snapshot OCR companion for the Grand Live scenario"
 authors = ["Romain Foucher"]
 edition = "2021"
