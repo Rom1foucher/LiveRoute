@@ -100,8 +100,10 @@ in-game counters; failed reads are rendered as `?` and confidence controls the
 visual warning state.
 
 `npm run prepare:ocr` generates the Tesseract language resources in an ignored
-directory. Tesseract's JavaScript runtime is dynamically imported at the first
-OCR warm-up instead of joining the initial desktop bundle.
+directory. Desktop `dev` and `build` invoke it automatically, so a Tauri build
+cannot silently omit the local worker/WASM/language payload. Tesseract's
+JavaScript runtime is dynamically imported at the first OCR warm-up instead of
+joining the initial desktop bundle.
 
 ## Persistence and diagnostics
 
@@ -112,10 +114,13 @@ The `DecisionSink` port isolates platform persistence:
 | Web     | Bounded `localStorage` history, exportable as NDJSON   |
 | Desktop | Durable application file with browser-storage fallback |
 
-The application version is injected at startup. The decision log has its own
-schema version because log compatibility does not necessarily follow SemVer.
-Each recommendation records the input state, candidates, decision vector,
-selected action, override state, timings, and later user choice.
+The application version is injected at startup. `npm run check:versions` keeps
+root/workspace package metadata, Web/Desktop `APP_VERSION`, Tauri metadata,
+Cargo metadata and the lockfile on one SemVer. The decision log has its own
+schema and policy versions because solver/log compatibility does not necessarily
+follow application SemVer. Each recommendation records the input state,
+candidates, decision vector, selected action, override state, timings, and
+later user choice.
 
 ## Automated guards
 
@@ -141,6 +146,9 @@ selected action, override state, timings, and later user choice.
 | `npm run build --workspace @glcp/desktop` | Desktop frontend bundle                     |
 | `npm run build:desktop`                   | Native Tauri application and NSIS installer |
 
-`ci.yml` validates quality and the browser build. `deploy-pages.yml` publishes
-`main` to GitHub Pages. `build-windows.yml` performs on-demand native builds and
-publishes the installer for `v*` tags.
+`ci.yml` validates quality, release-metadata parity and the browser build.
+`deploy-pages.yml` publishes `main` at base `/` because the upstream Pages site
+is served through the custom domain `liveroute.tmoperao.fr`; Vite remains
+configurable through `VITE_BASE_PATH` for project-site builds.
+`build-windows.yml` performs on-demand native builds and publishes the installer
+for `v*` tags.

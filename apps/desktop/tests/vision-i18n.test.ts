@@ -32,3 +32,24 @@ test("les libellés des zones de calibration ne restent pas en français", () =>
     "Song 3 · cover",
   );
 });
+
+test("les timeouts et erreurs OCR du hotfix restent localisés", () => {
+  assert.equal(
+    localizeOcrRuntimeText(
+      "en",
+      "Initialisation OCR expirée. Les ressources Tesseract locales sont peut-être absentes ou bloquées.",
+    ),
+    "OCR initialization timed out. The local Tesseract assets may be missing or blocked.",
+  );
+  assert.equal(
+    localizeOcrRuntimeText(
+      "en",
+      "Reconnaissance OCR expirée. Le worker Tesseract sera recréé à la prochaine capture.",
+    ),
+    "OCR recognition timed out. The Tesseract worker will be restarted on the next capture.",
+  );
+  assert.equal(
+    localizeOcrRuntimeText("en", "Erreur OCR : worker failed"),
+    "OCR error: worker failed",
+  );
+});

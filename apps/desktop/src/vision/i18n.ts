@@ -41,6 +41,16 @@ const ENGLISH_RUNTIME_COPY = new Map<string, string>([
     "Canvas 2D indisponible pour l’apprentissage numérique.",
     "2D canvas is unavailable for numeric learning.",
   ],
+  ["Canvas 2D indisponible.", "2D canvas is unavailable."],
+  ["Canvas OCR indisponible.", "OCR canvas is unavailable."],
+  [
+    "Initialisation OCR expirée. Les ressources Tesseract locales sont peut-être absentes ou bloquées.",
+    "OCR initialization timed out. The local Tesseract assets may be missing or blocked.",
+  ],
+  [
+    "Reconnaissance OCR expirée. Le worker Tesseract sera recréé à la prochaine capture.",
+    "OCR recognition timed out. The Tesseract worker will be restarted on the next capture.",
+  ],
 ]);
 
 /**
@@ -80,6 +90,7 @@ export const localizeOcrRuntimeText = (
       /^Capture refusée par Windows ou le client graphique : (.+)$/,
       "Capture rejected by Windows or the graphics client: $1",
     ],
+    [/^Erreur OCR : (.+)$/, "OCR error: $1"],
   ];
   for (const [pattern, replacement] of replacements) {
     if (pattern.test(value)) return value.replace(pattern, replacement);

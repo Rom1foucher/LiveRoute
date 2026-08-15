@@ -384,12 +384,12 @@ export const UI_FR = {
     technique: "Technique",
     songSelectionLabel: "Sélection de chanson",
     acheteLaChansonReserveeAvant:
-      "Achète la chanson réservée avant de reprendre les techniques.",
+      "Choisis puis achète une song de la page portée avant de reprendre les techniques.",
     achetee: "Achetée",
     alternativeSure: "Alternative sûre",
     aucunCoutASaisirLe:
       "Aucun coût à saisir : le tracker avance uniquement le pattern.",
-    carryoverAAcheter: "Carryover à acheter",
+    carryoverAAcheter: "Page portée à traiter",
     choisirDansLesOptions: "Choisir dans les options",
     choisisLoptionReellementAchetee: "Choisis l’option réellement achetée",
     choixVisible: "Choix visible",
@@ -408,8 +408,8 @@ export const UI_FR = {
     nonMesure: "Non mesuré",
     overridePushForce: "Override · push forcé",
     concertPlayedTo: (concert: string) => `Concert joué → ${concert}`,
-    pageSongsPorteeAutomatiquement: (song: string) =>
-      `Page de songs portée automatiquement · ancre ${song}`,
+    pageSongsPorteeAutomatiquement: (songs: string) =>
+      `Page de songs portée automatiquement · ${songs}`,
     patternJuniorNonEtabli: "Pattern Junior non établi",
     priorityDecision: "Décision prioritaire",
     quandCeConcertEstJoue:

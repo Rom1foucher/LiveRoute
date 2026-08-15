@@ -1,8 +1,10 @@
-# V1 algorithmic model
+# Current Grand Live algorithmic model
 
-This document describes the decision model shipped in v1.0.0. Historical
-experiments, replay-specific investigations, and superseded reserve designs are
-kept under `docs/archive/`; they are not normative.
+This document describes the current solver policy after the 2026-08-13 audit
+correction series (PR-0 through PR-7), identified in decision telemetry as
+`grand-live-v6`. Historical experiments, replay-specific investigations, and
+superseded reserve designs are kept under `docs/archive/`; they are not
+normative.
 
 The mechanical source of truth is
 `packages/core/src/domain/live-rules.ts`, currently identified as
@@ -80,28 +82,66 @@ affordable future acquisition remains rejected.
 
 ### C2: hunt SP +2, then hold or close
 
-While the SP +2 target remains active, C2 is in `HUNT`. Once the target is
-acquired or deliberately abandoned:
+While the SP +2 target remains active, C2 is in `HUNT`. HUNT is section-local
+and persistent: it records physical song pages seen without the target,
+technique spend committed while chasing, and filler purchases made during the
+chase. Re-running OCR or analysis on the same `concertIndex:songCycle` page does
+not count another miss.
+
+The first two misses are treated as normal page variance. Starting with the
+third miss, HUNT no longer receives an automatic structural bonus. The solver
+compares `CONTINUE_HUNT` with `ABANDON_TO_HOLD` from the remaining value only:
+
+```text
+P(find & fund) × remaining SP-training exposure
+- expected future/filler cost
+- PR-5 reserve opportunity cost
+- miss/filler/deep-cycle penalties
+```
+
+Past technique spend is retained in telemetry but is a sunk cost and never a
+reason to continue. A valuable target behind a short, cheap cycle can therefore
+still justify pursuit after three misses; a weak/deep chase is abandoned.
+
+Once the target is acquired or deliberately abandoned:
 
 - `section-open` uses strict `HOLD` and will not reopen a hidden Friendship or
   filler chain;
-- `deadline-now` switches to `CLOSE` if the Great Success gauge is incomplete;
-- after the third manual song, the plan immediately returns to `HOLD`.
+- `deadline-now` switches to `CLOSE` if the Great Success gauge is incomplete.
 
-An older SP or Friendship may remain a visible optional purchase without
-becoming a hidden chase target.
+Abandonment persists for the rest of the section. It is reset at the next
+section; target acquisition also clears the HUNT state. An older SP or
+Friendship may remain a visible optional purchase without becoming a hidden
+chase target.
 
 ### C3: hunt SP +3, then hold or close
 
-C3 applies the same state machine to SP +3. The separation between hidden
-`chaseTargets`, visible `optionalTargets`, and future `reserveTargets` prevents
-an already completed or abandoned objective from silently reopening spending.
+C3 applies the same persistent state machine and marginal comparison to SP +3.
+The separation between hidden `chaseTargets`, visible `optionalTargets`, and
+future `reserveTargets` prevents an already completed or abandoned objective
+from silently reopening spending.
 
 ### C4: accumulate toward valuable final state
 
 C4 continues to value relevant Friendship targets, current lesson quality,
 pool thinning, and the exact Grand Live continuation. The displayed 16-song
 checkpoint is pacing telemetry rather than a hard purchase gate.
+
+The terminal comparison uses activation-aware Friendship/SP/practice exposure,
+terminal conversion, **marginal opportunity cost**, and a profile risk penalty.
+Raw PR-5 token spend remains telemetry and a ranking tie-breaker; it is not
+subtracted as intrinsic value loss while C4 Friendship remains to be converted.
+
+Every C4 trial now uses the same opportunity-cost basis: the value of future C4
+Friendship combinations that become jointly unfundable plus any currently
+fundable purchase capacity lost on the route to 18 songs. A miss/carry that
+destroys no option therefore no longer falls back to the full raw token spend.
+It still pays a small fixed failed-search penalty, while fillers and actual
+option destruction remain costly. This prevents 15-20 % miss branches from
+dominating the expected cost merely because a large but harmless token pile was
+spent. A candidate below the nominal 92 % Standard threshold can therefore
+still win when its net value is materially positive, provided the Wilson lower
+bound stays above the catastrophe floor.
 
 The solver may stop below 16 when spending now does not improve the prospective
 state, or continue above it for a valuable target. A filler is not promoted
@@ -135,20 +175,38 @@ The shared `DecisionVector` uses this order:
 
 1. mechanical validity and deterministic hard constraints;
 2. admission under the selected risk profile;
-3. costed prospective state and pacing debt;
-4. ordinal structural value;
-5. lexicographic continuation value;
-6. retained tokens;
-7. lower committed cost;
-8. stable candidate identifier.
+3. ordinal structural value of the visible song;
+4. material deterministic value available on the current page;
+5. costed prospective state and pacing debt;
+6. lexicographic continuation value;
+7. retained tokens;
+8. lower committed cost;
+9. stable candidate identifier.
+
+Current-page training exposure is deliberately materialised in coarse 20-unit
+bands. This makes a large deterministic distinction such as Speed +1 versus
+Guts +1 under a Speed/Wit profile visible before future Monte-Carlo noise, while
+small stat differences remain free to cede to reserve economics. Waiting on the
+current page retains this certain option value; carry to a later section does
+not pretend the bonus was activated now.
 
 Risk thresholds are:
 
-| Profile  | Minimum admitted probability |
-| -------- | ---------------------------: |
-| Safe     |                        98.5% |
-| Standard |                          92% |
-| Greedy   |                          78% |
+| Profile  | Preferred probability |
+| -------- | --------------------: |
+| Safe     |                 98.5% |
+| Standard |                   92% |
+| Greedy   |                   78% |
+
+C1-C3 still use these values as conservative admission thresholds. Terminal C4
+is different: the threshold is a preferred operating point, not a binary veto.
+C4 compares effective structural value against marginal opportunity cost and a
+continuous risk penalty. The risk term is scaled by the larger of value-at-risk
+and destroyed future options, so abundant stock does not erase uncertainty. A
+Wilson 95 % lower bound below the catastrophe floor
+(`max(65%, threshold - 20 points)`) remains a hard stop. This removes the
+91.99/92.00 cliff without allowing arbitrarily weak branches to buy their way
+through the risk policy.
 
 Probability differences inside the same admission band are weak tie-breakers.
 They do not override mechanical constraints, material structural value, or a
@@ -235,23 +293,44 @@ Probability is separate from feasibility. The solver never reserves
 
 ## Technique ranking
 
-Observed technique offers are compared in an explainable sequence:
+Observed technique ranking is a two-stage total order. First, same-support
+Pareto dominance is computed outside the comparator: if two techniques spend
+exactly the same token colours and one is component-wise no more expensive and
+strictly cheaper on at least one colour, the expensive offer is dominated. It
+remains visible for manual override but cannot win the automatic ranking.
+
+Pareto survivors are converted once into immutable ranking snapshots and then
+ordered lexicographically:
 
 1. affordability;
-2. immediate deterministic blocking of a strategic target;
-3. dominance on the same set of colours;
-4. hard terminal state;
-5. breaks and deficit below the strategic frontier;
-6. reach and joint-goal admission band;
-7. strategic opportunity cost;
-8. shadow-price-weighted cost;
-9. total cost and normalised reserve drain;
-10. next-page coverage, terminal economy, generic continuation, and stable ID.
+2. absence of an immediate deterministic strategic block;
+3. risk admission (PR-4 terminal candidates use their terminal admission and do
+   not recreate the generic Standard 92 % cliff);
+4. terminal hard/admission state;
+5. reserve breaches and reserve deficit;
+6. material terminal structural bands;
+7. next-page plan coverage;
+8. material total-cost band (5 tokens);
+9. reserve drain / post-purchase surplus band;
+10. shadow-price-weighted demand cost;
+11. post-purchase margins and exact cost tie-break;
+12. 5-point goal/reach probability bands;
+13. terminal economy, retained tokens and stable IDs.
 
-`rankReason` records the first criterion that separated a candidate from the
-winner. A more expensive technique on the same colour support remains available
-as an override because an Energy or Hint effect may be operationally valuable
-even when the OCR cannot observe that value.
+The ordering intentionally lets a 25-token spend from a heavily overflowing
+colour beat a 24-token spend from a materially tighter colour when neither
+violates a hard reserve. A large raw cost difference still wins first through
+the 5-token cost band, preserving the cheaper-choice regressions.
+
+Because dominance is a prefilter rather than a pairwise short-circuit, no
+criterion can create an `A > B > C > A` cycle. Property tests replay random
+triplets under all six input permutations. `rankReason` records the first
+criterion that separated a candidate from the winner; a Pareto-dominated offer
+uses `same-colour-dominance`.
+
+A more expensive technique on the same colour support remains available as an
+override because an Energy or Hint effect may be operationally valuable even
+when the OCR cannot observe that value.
 
 ## Horizons and probabilities
 
@@ -282,9 +361,36 @@ probability. Invalid or unreachable candidates have joint probability zero.
 Qualitative 16/18 capacity diagnostics remain separate from these simulated
 shop probabilities.
 
-The UI budgets deterministic samples by profile and may stop early once
-confidence intervals no longer cross a decision boundary. Diagnostics record
-the actual sample count and time spent in each sub-engine.
+Probability-like entries inside song/cross-section `DecisionVector` arrays are
+compared in anchored 5-percentage-point bands (`round(p / 0.05)`). This is an
+absolute quantisation, not a pairwise epsilon: it is therefore transitive. A
+99.0 % versus 99.6 % micro-delta cannot outrank a later deterministic structural
+or economic criterion, while a move into another material band still can. Hard
+and risk-admission fields remain exact.
+
+Adaptive sampling is engine-specific and deterministic:
+
+- `runAnalysis()` checks every 128 samples. Unless explicitly overridden, it
+  requires all samples for budgets <=600, 768 samples up to 8,000, and 1,024
+  above that. Reach/goal Wilson intervals must be <=3.5 points wide and must not
+  cross their decision boundaries (reach: catastrophe floor, profile threshold,
+  98.5 %; non-carryover goal: 0, 50 %, 80 %).
+- transition-aware song pages check every 128 samples, with minimums of all
+  samples <=600, 640 up to 6,000, and 896 above. Wilson intervals for checkpoint,
+  target, first-page reach and first-page target affordability must be <=4
+  points wide and avoid 50 %, 80 % and the profile threshold.
+- terminal technique comparison uses common random numbers, checks every 64
+  samples, normally waits for at least 192 samples, and requires a stable reach
+  interval plus paired structural/net-value separation. C4 uses the paired
+  net-value interval around zero after risk penalty. Desktop calls additionally
+  impose a wall-clock budget of about 0.9 s in Express and 1.8 s in Expert; when
+  time expires the result is returned as `uncertainAtBudgetLimit` instead of
+  freezing the renderer for tens of seconds.
+
+If the maximum budget is exhausted first, diagnostics expose
+`uncertainAtBudgetLimit`; the ranking never treats a `1e-10` MC decimal as
+material evidence. Diagnostics also record the actual sample count and time
+spent in each sub-engine.
 
 ## Cross-section value
 

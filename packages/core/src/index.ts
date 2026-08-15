@@ -9,6 +9,7 @@
  */
 
 export * from "./live-model.ts";
+export * from "./monte-carlo.ts";
 export * from "./run-pulse.ts";
 
 export * from "./domain/carryover-selection.ts";
@@ -22,6 +23,9 @@ export * from "./solver/carry.ts";
 export * from "./solver/context.ts";
 export * from "./solver/cross-section.ts";
 export * from "./solver/forced-override.ts";
+export * from "./solver/hunt-state.ts";
+export * from "./solver/page-actions.ts";
+export * from "./solver/resource-economy.ts";
 export * from "./solver/song-dp.ts";
 export * from "./solver/song-policy.ts";
 export * from "./solver/song-transition.ts";
@@ -36,3 +40,5 @@ export * from "./diagnostics/decision-log.ts";
 export * from "./diagnostics/decision-safety.ts";
 
 export * from "./ports/index.ts";
+
+export * from "./diagnostics/replay.ts";

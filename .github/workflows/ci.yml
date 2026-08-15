@@ -10,8 +10,8 @@ jobs:
     name: Core
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -24,12 +24,13 @@ jobs:
     name: Format, types, and application tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:versions
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
@@ -38,12 +39,17 @@ jobs:
     name: Build web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
       - run: npm ci
+      - run: npm run check:versions
       - run: npm run build:web
+        env:
+          # Production is served from the verified custom domain, not /LiveRoute/.
+          VITE_BASE_PATH: /
       - uses: actions/upload-artifact@v4
         with:
           name: web-dist

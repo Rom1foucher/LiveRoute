@@ -30,7 +30,7 @@ test("un carry vide ou invalide est restauré comme absent", () => {
   assert.equal(state.carryoverSongIds, null);
 });
 
-test("une session restaurée ne conserve jamais plusieurs songs portées", () => {
+test("une session restaurée conserve la page portée jusqu’à trois songs", () => {
   const state = sanitizePersistedSongState({
     validIds: new Set(["carry-a", "carry-b", "visible"]),
     ownedSongIds: [],
@@ -39,11 +39,11 @@ test("une session restaurée ne conserve jamais plusieurs songs portées", () =>
     carryoverSongIds: ["carry-a", "carry-b"],
   });
 
-  assert.deepEqual(state.carryoverSongIds, ["carry-a"]);
+  assert.deepEqual(state.carryoverSongIds, ["carry-a", "carry-b"]);
   assert.deepEqual(state.visibleSongIds, ["visible"]);
 });
 
-test("la page visible et la song portée restent deux informations distinctes", () => {
+test("la page visible et la page portée restent deux informations distinctes", () => {
   const state = sanitizePersistedSongState({
     validIds: new Set(["a", "b", "c"]),
     ownedSongIds: [],

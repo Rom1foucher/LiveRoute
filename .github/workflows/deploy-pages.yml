@@ -37,12 +37,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check release metadata
+        run: npm run check:versions
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
 
       - name: Build web application
         run: npm run build:web
         env:
+          # The verified custom domain is served from its root. Vite still supports
+          # alternate repository-site bases for local/release validation.
           VITE_BASE_PATH: /
 
       - name: Upload GitHub Pages artifact

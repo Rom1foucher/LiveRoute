@@ -11,7 +11,8 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "replay:fixture": "node --experimental-strip-types scripts/replay-fixture.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0"

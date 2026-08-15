@@ -46,7 +46,10 @@ import { createCaptureGate } from "./capture-gate.ts";
 import { assessSnapshotReliability } from "./snapshot-validation.ts";
 import { isPlausibleTechniqueCost } from "./technique-cost.ts";
 import { detectTechniquePeriodDrift } from "./period-drift.ts";
-import { assessStockContinuity } from "./stock-continuity.ts";
+import {
+  assessStockContinuity,
+  stockContinuityRequiresConfirmation,
+} from "./stock-continuity.ts";
 import { pendingOverlayPayload, tokenOverlayValues } from "./overlay-state.ts";
 import type { StockContinuityAssessment } from "./stock-continuity.ts";
 import type { DecisionSinkStatus, PipelineTimings } from "@glcp/core";
@@ -671,6 +674,11 @@ export default function SnapshotCompanionPanel({
     );
   }, [continuityBaselineAtCapture, draftTokens, snapshot]);
   const [dismissedStockContinuity, setDismissedStockContinuity] = useState("");
+  const stockContinuityBlocked = Boolean(
+    stockContinuity &&
+    stockContinuityRequiresConfirmation(stockContinuity) &&
+    dismissedStockContinuity !== stockContinuity.fingerprint,
+  );
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<OcrProgress | null>(null);
   const [message, setMessage] = useState(() =>
@@ -923,33 +931,46 @@ export default function SnapshotCompanionPanel({
                 draftBalanceValue(accepted.drafts.tokens),
               )
             : null;
-          const applied = buildAppliedVisionSnapshot({
-            snapshot: next,
-            page,
-            draftTokens: accepted.drafts.tokens,
-            draftTechniques: accepted.drafts.techniques,
-            draftSongs: accepted.drafts.songs,
-            context,
-            language,
-            extraWarnings: continuity
-              ? [stockContinuityWarningText(continuity, language)]
-              : [],
-          });
-          setOverlayDismissed(false);
-          setAppliedFrame(nextFrame);
-          setAppliedSnapshot(applied);
-          onApply(applied);
-          setMessage(
-            continuity
-              ? text(
-                  "Snapshot appliqué. Vérifie l’écart de stock signalé si la run n’a pas évolué hors OCR.",
-                  "Snapshot applied. Review the reported stock difference if the run did not change outside OCR.",
-                )
-              : text(
-                  "Snapshot fiable : appliqué et analysé automatiquement.",
-                  "Reliable snapshot: applied and analysed automatically.",
-                ),
-          );
+          if (stockContinuityRequiresConfirmation(continuity)) {
+            // Do not let a high-confidence but obviously truncated token value
+            // (e.g. 263 -> 6) reach the solver automatically. The drafts stay
+            // editable; correction or an explicit "Intentional" acknowledgement
+            // is required before apply.
+            setMessage(
+              text(
+                "Snapshot OCR fiable, mais un écart de stock fortement suspect doit être corrigé ou confirmé avant l’analyse.",
+                "OCR snapshot is reliable, but a strongly suspicious stock change must be corrected or confirmed before analysis.",
+              ),
+            );
+          } else {
+            const applied = buildAppliedVisionSnapshot({
+              snapshot: next,
+              page,
+              draftTokens: accepted.drafts.tokens,
+              draftTechniques: accepted.drafts.techniques,
+              draftSongs: accepted.drafts.songs,
+              context,
+              language,
+              extraWarnings: continuity
+                ? [stockContinuityWarningText(continuity, language)]
+                : [],
+            });
+            setOverlayDismissed(false);
+            setAppliedFrame(nextFrame);
+            setAppliedSnapshot(applied);
+            onApply(applied);
+            setMessage(
+              continuity
+                ? text(
+                    "Snapshot appliqué. Vérifie l’écart de stock signalé si la run n’a pas évolué hors OCR.",
+                    "Snapshot applied. Review the reported stock difference if the run did not change outside OCR.",
+                  )
+                : text(
+                    "Snapshot fiable : appliqué et analysé automatiquement.",
+                    "Reliable snapshot: applied and analysed automatically.",
+                  ),
+            );
+          }
         }
         setTab("live");
       } catch (reason) {
@@ -997,10 +1018,32 @@ export default function SnapshotCompanionPanel({
     setBusy(true);
     setError("");
     setMessage(text("Capture de la fenêtre…", "Capturing window…"));
+    // The overlay belongs to the previous accepted snapshot. It must be hidden
+    // before the native window capture starts, otherwise an always-on-top
+    // overlay can become part of the pixels sent to OCR. Clearing the applied
+    // frame also prevents the overlay effect from re-showing it mid-capture.
+    setAppliedFrame(null);
+    setAppliedSnapshot(null);
+    setOverlayDismissed(false);
     try {
+      await hideOverlay();
       const captureStartedAt = performance.now();
       const nextFrame = await captureWindow(selected);
       const captureMs = performance.now() - captureStartedAt;
+
+      // Commit the native frame immediately. Capture and OCR are two separate
+      // pipeline stages: a slow or failed OCR must never make a successful
+      // Windows capture look as if it never happened.
+      setFrame(nextFrame);
+      setTab("live");
+      onPipelineTimings({ captureMs, totalMs: captureMs });
+      setMessage(
+        text(
+          `Capture OK · ${nextFrame.imageWidth}×${nextFrame.imageHeight}. OCR en cours…`,
+          `Capture OK · ${nextFrame.imageWidth}×${nextFrame.imageHeight}. OCR running…`,
+        ),
+      );
+
       await recognizeCapturedFrame(
         nextFrame,
         resolvedPageRef.current,
@@ -1014,13 +1057,15 @@ export default function SnapshotCompanionPanel({
         setError(
           reason instanceof Error
             ? runtimeText(reason.message)
-            : text("La capture Windows a échoué.", "Windows capture failed."),
+            : typeof reason === "string"
+              ? runtimeText(reason)
+              : text("La capture Windows a échoué.", "Windows capture failed."),
         );
       }
     } finally {
       captureGateRef.current.finish(generation);
     }
-  }, [language, onOpen, recognizeCapturedFrame]);
+  }, [language, onOpen, onPipelineTimings, recognizeCapturedFrame]);
 
   useEffect(() => {
     captureRef.current = () => {
@@ -1111,6 +1156,15 @@ export default function SnapshotCompanionPanel({
 
   const applySnapshot = () => {
     if (!snapshot || !frame) return;
+    if (stockContinuityBlocked) {
+      setError(
+        text(
+          "Corrige l’écart de stock suspect ou confirme « C’est volontaire » avant d’appliquer le snapshot.",
+          "Correct the suspicious stock change or confirm ‘Intentional’ before applying the snapshot.",
+        ),
+      );
+      return;
+    }
     const next = buildAppliedVisionSnapshot({
       snapshot,
       page: resolvedPage,
@@ -1131,8 +1185,8 @@ export default function SnapshotCompanionPanel({
     setMessage(
       stockContinuity
         ? text(
-            "Snapshot validé avec un écart de stock non bloquant.",
-            "Snapshot validated with a non-blocking stock difference.",
+            "Snapshot validé avec l’écart de stock confirmé.",
+            "Snapshot validated with the stock change confirmed.",
           )
         : text(
             "Snapshot validé. Le solver calcule la recommandation et l’overlay se met à jour.",
@@ -1481,6 +1535,15 @@ export default function SnapshotCompanionPanel({
                 "Au moins un coût de technique est incomplet ou impossible pour cette période.",
                 "At least one technique cost is incomplete or impossible for this period.",
               ),
+        );
+        return;
+      }
+      if (stockContinuityBlocked) {
+        setError(
+          text(
+            "Corrige l’écart de stock suspect ou confirme « C’est volontaire » avant l’analyse.",
+            "Correct the suspicious stock change or confirm ‘Intentional’ before analysis.",
+          ),
         );
         return;
       }
@@ -2338,10 +2401,15 @@ export default function SnapshotCompanionPanel({
                                 "Cela peut être normal après des achats, des gains de tokens ou une saisie manuelle hors OCR.",
                                 "This may be normal after purchases, token gains or manual input outside OCR.",
                               )}{" "}
-                        {text(
-                          "La validation reste autorisée.",
-                          "Validation remains available.",
-                        )}
+                        {stockContinuityRequiresConfirmation(stockContinuity)
+                          ? text(
+                              "La validation est bloquée jusqu’à correction ou confirmation explicite.",
+                              "Validation is blocked until correction or explicit confirmation.",
+                            )
+                          : text(
+                              "La validation reste autorisée.",
+                              "Validation remains available.",
+                            )}
                       </small>
                     </div>
                     <button
@@ -2706,7 +2774,12 @@ export default function SnapshotCompanionPanel({
                     type="button"
                     className="snapshot-primary apply"
                     onClick={applySnapshot}
-                    disabled={!snapshot || !resultReady || busy}
+                    disabled={
+                      !snapshot ||
+                      !resultReady ||
+                      busy ||
+                      stockContinuityBlocked
+                    }
                   >
                     {text("Valider et analyser", "Validate and analyse")}
                     <small>

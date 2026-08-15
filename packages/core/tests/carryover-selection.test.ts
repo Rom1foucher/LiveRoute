@@ -9,11 +9,13 @@ const policy = (
   songId: string | null,
   hard: number,
   valid = true,
+  carriedSongIds?: readonly string[],
 ): SongPolicyEvaluation => ({
   id,
   action,
   songId,
   songName: songId ?? "none",
+  carriedSongIds,
   valid,
   overrideEligible: false,
   score: 0,
@@ -46,29 +48,37 @@ const policy = (
     greatSuccessStatGain: 0,
     practiceBonusValue: 0,
     liveBonusValue: 0,
+    practiceTrainingExposure: 0,
+    spTrainingExposure: 0,
+    friendshipTrainingExposure: 0,
   },
   reasons: [],
 });
 
-test("le bouton carryover résout une page valide même si STOP est affiché", () => {
+test("le carryover résout l'action page même si une autre politique est affichée", () => {
   const stop = policy("stop", "stop-and-carry-stock", null, 2);
-  const weak = policy("a:carry", "carry-page", "a", 1);
-  const strong = policy("b:carry", "carry-page", "b", 2);
+  const carry = policy("carry-page:a,b,c", "carry-page", null, 1, true, [
+    "a",
+    "b",
+    "c",
+  ]);
   const result = selectCarryoverPolicy({
-    policies: [stop, weak, strong],
+    policies: [stop, carry],
     displayed: stop,
     visibleSongIds: new Set(["a", "b", "c"]),
   });
-  assert.equal(result?.id, "b:carry");
+  assert.equal(result?.id, "carry-page:a,b,c");
 });
 
-test("le carry affiché reste la cible du bouton", () => {
-  const displayed = policy("a:carry", "carry-page", "a", 1);
-  const other = policy("b:carry", "carry-page", "b", 2);
+test("une action carry qui ne décrit pas la page visible est rejetée", () => {
+  const partial = policy("carry-page:a,b", "carry-page", null, 2, true, [
+    "a",
+    "b",
+  ]);
   const result = selectCarryoverPolicy({
-    policies: [displayed, other],
-    displayed,
-    visibleSongIds: new Set(["a", "b"]),
+    policies: [partial],
+    displayed: partial,
+    visibleSongIds: new Set(["a", "b", "c"]),
   });
-  assert.equal(result?.id, "a:carry");
+  assert.equal(result, null);
 });

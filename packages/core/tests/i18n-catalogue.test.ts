@@ -42,6 +42,18 @@ const SAMPLES: Record<MessageCode, Message> = {
     code: "reason.huntContinuationRefused",
     cause: { code: "reason.huntAbandonTechniqueCount", techniques: 5 },
   },
+  "reason.huntAbandonMarginalValue": {
+    code: "reason.huntAbandonMarginalValue",
+    probability: 0.2,
+    netValue: -3.5,
+    pages: 3,
+  },
+  "reason.huntContinueMarginalValue": {
+    code: "reason.huntContinueMarginalValue",
+    probability: 0.45,
+    netValue: 8.2,
+    pages: 3,
+  },
   "reason.securesGreatSuccess": { code: "reason.securesGreatSuccess" },
   "policy.noPurchase": { code: "policy.noPurchase" },
   "reason.finalGateSecuredCounter": {
@@ -84,6 +96,9 @@ const SAMPLES: Record<MessageCode, Message> = {
   "reason.nextSectionValue": {
     code: "reason.nextSectionValue",
     friendshipBonus: 12.34,
+    friendshipTrainingExposure: 123.4,
+    spTrainingExposure: 44,
+    practiceTrainingExposure: 18,
     lessonSkillPoints: 61.7,
     horizonSections: 1,
   },
@@ -107,6 +122,9 @@ const SAMPLES: Record<MessageCode, Message> = {
   "reason.carryNextSectionValue": {
     code: "reason.carryNextSectionValue",
     friendshipBonus: 7.5,
+    friendshipTrainingExposure: 75,
+    spTrainingExposure: 22,
+    practiceTrainingExposure: 8,
     lessonSkillPoints: 25,
   },
   "reason.carriedSongLessonSkillPoints": {
@@ -128,6 +146,7 @@ const SAMPLES: Record<MessageCode, Message> = {
   "reason.stopNextSectionFriendship": {
     code: "reason.stopNextSectionFriendship",
     friendshipBonus: 15,
+    friendshipTrainingExposure: 150,
     horizonSections: 2,
   },
   "reason.greatSuccessSecured": { code: "reason.greatSuccessSecured" },
@@ -186,6 +205,33 @@ const SAMPLES: Record<MessageCode, Message> = {
   "terminal.stopNow": {
     code: "terminal.stopNow",
     gain: { code: "terminal.gainNone" },
+  },
+  "terminal.exposeAndCarryValue": {
+    code: "terminal.exposeAndCarryValue",
+    grossValue: 40,
+    opportunityCost: 25,
+    riskPenalty: 2,
+    netValue: 13,
+    reachLowerBound: 0.9,
+    catastropheFloor: 0.72,
+  },
+  "terminal.stopNowValue": {
+    code: "terminal.stopNowValue",
+    grossValue: 12,
+    opportunityCost: 25,
+    riskPenalty: 3,
+    netValue: -16,
+    reachLowerBound: 0.9,
+    catastropheFloor: 0.72,
+  },
+  "terminal.stopNowCatastropheFloor": {
+    code: "terminal.stopNowCatastropheFloor",
+    grossValue: 80,
+    opportunityCost: 10,
+    riskPenalty: 4.4,
+    netValue: 65.6,
+    reachLowerBound: 0.7,
+    catastropheFloor: 0.72,
   },
   "override.forcedPushActive": { code: "override.forcedPushActive" },
   "override.forcedPushOption": { code: "override.forcedPushOption", option: 2 },
@@ -305,10 +351,13 @@ test("le gel de formulation : la version française reste identique", () => {
       {
         code: "reason.nextSectionValue",
         friendshipBonus: 12.34,
+        friendshipTrainingExposure: 123.4,
+        spTrainingExposure: 44,
+        practiceTrainingExposure: 18,
         lessonSkillPoints: 61.7,
         horizonSections: 1,
       },
-      "valeur inter-section sans revenu futur : 12.3 % Friendship et 62 SP de lessons attendus sur la section suivante",
+      "valeur inter-section sans revenu futur : 12.3 % Friendship acquis, exposition 123.4 %·entraînement, SP-training 44, autres entraînements 18, et 62 SP de lessons attendus sur la section suivante",
     ],
     [
       { code: "reason.reachNextPage", probability: 0.673 },
@@ -364,6 +413,30 @@ test("le gel de formulation : la version française reste identique", () => {
         gain: { code: "terminal.gainNextTarget" },
       },
       "EXPOSE_AND_CARRY justifié : augmente réellement l’acquisition de la cible suivante",
+    ],
+    [
+      {
+        code: "terminal.exposeAndCarryValue",
+        grossValue: 40,
+        opportunityCost: 25,
+        riskPenalty: 2,
+        netValue: 13,
+        reachLowerBound: 0.9,
+        catastropheFloor: 0.72,
+      },
+      "EXPOSE_AND_CARRY · valeur 40 - coût d’opportunité 25 - risque 2 = net 13 · borne basse reach 90 % (plancher 72 %)",
+    ],
+    [
+      {
+        code: "terminal.stopNowCatastropheFloor",
+        grossValue: 80,
+        opportunityCost: 10,
+        riskPenalty: 4.4,
+        netValue: 65.6,
+        reachLowerBound: 0.7,
+        catastropheFloor: 0.72,
+      },
+      "STOP_NOW · valeur 80 - coût d’opportunité 10 - risque 4.4 = net 65.6 · borne basse reach 70 % sous le plancher catastrophe 72 %",
     ],
     [
       {

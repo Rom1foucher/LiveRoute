@@ -35,8 +35,7 @@ imports. They can run without installing the frontend dependencies.
 ```bash
 npm run dev:web
 
-# or
-npm run prepare:ocr
+# or (OCR assets are prepared automatically)
 npm run dev:desktop
 ```
 
@@ -48,6 +47,7 @@ editions need the feature, it belongs in `packages/ui`.
 
 ```bash
 npm ci
+npm run check:versions
 npm run typecheck
 npm test
 ```
@@ -99,6 +99,7 @@ Pure interface labels belong in `packages/ui/src/i18n/ui-fr.ts` and
 ## Before pushing
 
 ```bash
+npm run check:versions
 npm run format:check
 npm run typecheck
 npm test
@@ -112,9 +113,50 @@ run it on Windows.
 
 ## Versions and durable logs
 
-The root version is shared by all four `package.json` files and by the Tauri
-configuration. Add the new entry at the top of `RELEASE_NOTES.md`.
+The root version is shared by all workspace `package.json` files, the Web/Desktop
+`APP_VERSION` constants, Tauri/Cargo metadata and the lockfile.
+`npm run check:versions` is the authoritative drift guard. Add the new entry at
+the top of `RELEASE_NOTES.md`. Solver `policyVersion` is intentionally separate
+from application SemVer.
 
-The decision log has an independent `schemaVersion` (currently 3). Increment it
+The decision log has an independent `schemaVersion` (currently 4). Increment it
 whenever a field changes type or meaning. NDJSON logs are durable diagnostic
-artifacts and must remain distinguishable across application versions.
+artifacts and must remain distinguishable across application versions. Schema
+v4 also records `policyVersion`, Monte-Carlo seed/sample/stop metadata, Wilson
+confidence intervals and decomposed page/target probabilities. The historical
+`reachProbability`/`goalProbability` candidate fields are retained as deprecated
+aliases for one compatibility cycle; new diagnostics should consume the v4
+`probabilities` object.
+
+Standalone solver regressions belong in `packages/core/fixtures/` and can be
+replayed outside the UI with:
+
+```bash
+npm run replay:fixture --workspace @glcp/core -- fixtures/<fixture>.json
+```
+
+### PR-3 Monte-Carlo diagnostics
+
+When changing stochastic evaluators, preserve common-random-number symmetry: UI candidate IDs must not alter future draws. Any evaluator that exhausts its adaptive budget while a decision boundary remains unresolved must surface `uncertainAtBudgetLimit` rather than presenting the estimate as converged. See `docs/PR3_MONTE_CARLO.md`.
+
+### PR-4 terminal C4 value policy
+
+C4 terminal decisions must not reapply the generic risk-threshold gate after
+`evaluateTerminalTechniqueOptions()`. Preserve the Wilson catastrophe floor.
+Current `grand-live-v6` policy prices C4 branches with marginal opportunity
+cost while Friendship remains in the pool; raw weighted spend remains
+diagnostic and must not silently become the decision cost again. Calibration
+changes require a regression demonstrating both value and destroyed future
+options. See `docs/PR4_TERMINAL_C4_VALUE.md` for the original PR and
+`docs/HOTFIX_V6_2026-08-14.md` for the current economy.
+
+### PR-5 shared resource economy
+
+Do not introduce a second reserve model in song or technique policy. Downstream
+vectors must be expressed as `ResourceDemand` and consumed through
+`buildSharedResourceEconomy()` / `calculateTokenPressure()`. Required fillers
+are OR-alternatives: their aggregate probability mass is bounded by the number
+of purchases still required and they must not become simultaneous hard
+reserves. Any `BUY_CONTINUE` with a positive technique depth must include at
+least the expected next-cycle technique cost. See
+`docs/PR5_RESOURCE_ECONOMY.md`.

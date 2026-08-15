@@ -9,6 +9,7 @@ import {
   type SongTarget,
   type TokenPressure,
 } from "../src/live-model.ts";
+import { SONGS } from "../src/domain/song-data.ts";
 import { deriveStrategicPlan } from "../src/planner/strategic-plan.ts";
 import { rankObservedTechniques } from "../src/solver/technique-dp.ts";
 import { FIXTURE_MESSAGE, fr } from "./helpers/messages.ts";
@@ -891,4 +892,310 @@ test("P1 v0.24 replay fbde s154 : Fanfare infaisable cède l'ancre à Harusora",
   const broken = techniqueSpendMetrics(offers[0], tokens, tokenPressure);
   assert.equal(safe.reserveBreachCount, 0);
   assert.ok(broken.reserveBreachCount > 0);
+});
+
+test("PR-4 : le ranking terminal ne réapplique pas le cliff Standard 92 %", () => {
+  const tokens = balance({
+    dance: 120,
+    passion: 120,
+    vocal: 120,
+    visual: 120,
+    mental: 120,
+  });
+  const songs = [
+    song({
+      id: "terminal-f10",
+      practiceBonus: "Speed training +2",
+      liveBonusType: "friendship",
+      liveBonusValue: 10,
+      cost: { dance: 26, visual: 42 },
+    }),
+  ];
+  const plan = deriveStrategicPlan({
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    remainingSongs: songs,
+  });
+  const tokenPressure = calculateTokenPressure(
+    tokens,
+    songs,
+    "speed-wit",
+    plan,
+  );
+
+  const ranked = rankObservedTechniques({
+    candidates: [
+      {
+        id: "valuable-below-92",
+        cost: balance({ dance: 20 }),
+        reachProbability: 0.9,
+        goalProbability: 0.9,
+        // Terminal policy says PUSH: above catastrophe floor and net-positive.
+        terminalDecisionVector: [1, 1, 1, 1, 0.8, 120, 0, 0, -20, 100],
+        payload: null,
+      },
+      {
+        id: "safe-but-stop",
+        cost: balance({ vocal: 20 }),
+        reachProbability: 0.94,
+        goalProbability: 0.94,
+        terminalDecisionVector: [0, 2, 0, 1, 0, 0, 0, 0, -20, 100],
+        payload: null,
+      },
+    ],
+    tokens,
+    songs,
+    plan,
+    riskProfile: "standard",
+    tokenPressure,
+  });
+
+  assert.equal(ranked[0]?.id, "valuable-below-92");
+  assert.equal(ranked[0]?.rankReason, "terminal-hard-state");
+});
+
+test("PR-7 : le triplet historique de dominance est invariant aux permutations", () => {
+  const tokens = balance({ dance: 100, passion: 100 });
+  const songs: SongTarget[] = [];
+  const plan = deriveStrategicPlan({
+    concertIndex: 2,
+    timingMode: "section-open",
+    remainingSongs: songs,
+  });
+  const candidates = [
+    {
+      id: "a-dance20-low-risk",
+      cost: balance({ dance: 20 }),
+      reachProbability: 0.9,
+      goalProbability: 0.9,
+      payload: null,
+    },
+    {
+      id: "b-dance30-admissible",
+      cost: balance({ dance: 30 }),
+      reachProbability: 0.95,
+      goalProbability: 0.95,
+      payload: null,
+    },
+    {
+      id: "c-passion10-low-risk",
+      cost: balance({ passion: 10 }),
+      reachProbability: 0.9,
+      goalProbability: 0.9,
+      payload: null,
+    },
+  ];
+  const permutations = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ];
+  const outputs = permutations.map((order) =>
+    rankObservedTechniques({
+      candidates: order.map((index) => candidates[index]!),
+      tokens,
+      songs,
+      plan,
+      riskProfile: "standard",
+      tokenPressure: [],
+    }).map((candidate) => candidate.id),
+  );
+
+  for (const output of outputs) assert.deepEqual(output, outputs[0]);
+  assert.deepEqual(outputs[0], [
+    "c-passion10-low-risk",
+    "a-dance20-low-risk",
+    "b-dance30-admissible",
+  ]);
+});
+
+test("PR-7 property : le ranking de triplets aléatoires est invariant aux six permutations", () => {
+  const tokens = balance({
+    dance: 160,
+    passion: 160,
+    vocal: 160,
+    visual: 160,
+    mental: 160,
+  });
+  const songs = [
+    song({
+      id: "property-target",
+      practiceBonus: "Skill Pt training +2",
+      liveBonusType: "speciality",
+      liveBonusValue: 5,
+      cost: { dance: 42, visual: 26 },
+    }),
+  ];
+  const plan = deriveStrategicPlan({
+    concertIndex: 2,
+    timingMode: "section-open",
+    remainingSongs: songs,
+  });
+  const tokenPressure = calculateTokenPressure(
+    tokens,
+    songs,
+    "speed-wit",
+    plan,
+  );
+  const permutations = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ];
+  let state = 0x51f15e;
+  const random = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+  const keys = ["dance", "passion", "vocal", "visual", "mental"] as const;
+
+  for (let sample = 0; sample < 64; sample += 1) {
+    const candidates = Array.from({ length: 3 }, (_, index) => {
+      const first = keys[Math.floor(random() * keys.length)]!;
+      const useSecond = random() > 0.65;
+      let second = keys[Math.floor(random() * keys.length)]!;
+      if (second === first)
+        second = keys[(keys.indexOf(first) + 1) % keys.length]!;
+      const partial: Partial<Balance> = {
+        [first]: 8 + Math.floor(random() * 25),
+      };
+      if (useSecond) partial[second] = 8 + Math.floor(random() * 17);
+      return {
+        id: `sample-${sample}-${index}`,
+        cost: balance(partial),
+        reachProbability: 0.72 + random() * 0.28,
+        goalProbability: 0.65 + random() * 0.35,
+        terminalDecisionVector:
+          random() > 0.5
+            ? [
+                1,
+                1,
+                Math.floor(random() * 3),
+                1,
+                random(),
+                random() * 30,
+                random(),
+                random() * 4,
+                -random() * 80,
+                random() * 200,
+              ]
+            : undefined,
+        payload: null,
+      };
+    });
+    const expected = rankObservedTechniques({
+      candidates,
+      tokens,
+      songs,
+      plan,
+      riskProfile: "standard",
+      tokenPressure,
+    }).map((candidate) => candidate.id);
+
+    for (const order of permutations) {
+      const actual = rankObservedTechniques({
+        candidates: order.map((index) => candidates[index]!),
+        tokens,
+        songs,
+        plan,
+        riskProfile: "standard",
+        tokenPressure,
+      }).map((candidate) => candidate.id);
+      assert.deepEqual(
+        actual,
+        expected,
+        `sample ${sample} / ${order.join("")}`,
+      );
+    }
+  }
+});
+
+test("hotfix v6 replay C4 : la pile Dance à 288 est consommée avant Passion à 104", () => {
+  const ids = [
+    "nigekiri",
+    "go-this-way",
+    "bluebird",
+    "grow-up-shine",
+    "komorebi",
+    "pyoitto",
+    "yumezora",
+    "present-march",
+    "daisuki",
+    "sekai",
+    "harusora",
+    "fanfare",
+  ];
+  const songs = ids.map((id) => {
+    const source = SONGS.find((candidate) => candidate.id === id);
+    assert.ok(source);
+    return {
+      id: source.id,
+      name: source.name,
+      cost: source.cost,
+      practiceBonus: source.practiceBonus,
+      ...contextualSongValues({
+        practiceBonus: source.practiceBonus,
+        liveBonusType: source.liveBonusType,
+        liveBonusValue: source.liveBonusValue,
+        declaredPriority: source.priority,
+      }),
+    };
+  });
+  const tokens = balance({
+    dance: 288,
+    passion: 104,
+    vocal: 107,
+    visual: 137,
+    mental: 142,
+  });
+  const plan = deriveStrategicPlan({
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    remainingSongs: songs,
+    songsThisSection: 0,
+  });
+  const tokenPressure = calculateTokenPressure(
+    tokens,
+    songs,
+    "speed-wit",
+    plan,
+  );
+  const ranked = rankObservedTechniques({
+    candidates: [
+      {
+        id: "passion-24",
+        cost: balance({ passion: 24 }),
+        reachProbability: 1,
+        goalProbability: 1,
+        payload: null,
+      },
+      {
+        id: "visual-25",
+        cost: balance({ visual: 25 }),
+        reachProbability: 1,
+        goalProbability: 1,
+        payload: null,
+      },
+      {
+        id: "dance-25",
+        cost: balance({ dance: 25 }),
+        reachProbability: 1,
+        goalProbability: 1,
+        payload: null,
+      },
+    ],
+    tokens,
+    songs,
+    plan,
+    riskProfile: "standard",
+    tokenPressure,
+  });
+  assert.equal(ranked[0]?.id, "dance-25");
+  assert.equal(ranked[0]?.rankReason, "reserve-drain");
 });

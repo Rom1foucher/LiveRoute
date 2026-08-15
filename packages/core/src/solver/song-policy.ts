@@ -1,12 +1,14 @@
 import type { Message, MissingToken } from "../i18n/messages.ts";
 import {
   TOKEN_KEYS,
-  calculateTokenPressure,
-  calculateTokenReservePlan,
+  TRAINING_HORIZON_BY_CONCERT,
+  acquiredEffectsForSong,
   canAfford,
   createTechniqueSimulationMemo,
+  effectExposure,
   estimateRemainingTrainingsByFacility,
   resolveStrategicObjective,
+  structuralTrainingValue,
   withStructuralTrainingValue,
   runAnalysis,
   subtractCost,
@@ -37,7 +39,11 @@ import {
   structuralTier,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
-import { evaluateExposedCarry } from "./carry.ts";
+import {
+  canonicalPageSongIds,
+  enumeratePageActions,
+  pageActionKey,
+} from "./page-actions.ts";
 import { evaluatePageCoverage, maximumAffordablePurchases } from "./song-dp.ts";
 import { assessCheckpointSupply } from "./supply-model.ts";
 import {
@@ -46,6 +52,19 @@ import {
   type DecisionVector,
 } from "./value.ts";
 import { evaluateTransitionAwareSongPages } from "./song-transition.ts";
+import {
+  alignHuntState,
+  createHuntState,
+  evaluateHuntDecision,
+  observeHuntPage,
+  shadowPremiumForCost,
+  type HuntDecision,
+  type HuntState,
+} from "./hunt-state.ts";
+import {
+  buildSharedResourceEconomy,
+  deriveReachableDemands,
+} from "./resource-economy.ts";
 import {
   evaluateCrossSectionReadiness,
   type CrossSectionReadinessResult,
@@ -61,8 +80,23 @@ export type SongPolicyAction =
 export type SongValueOutcome = {
   lessonSkillPoints: number;
   greatSuccessStatGain: number;
+  /** Legacy/raw telemetry retained for compatibility. */
   practiceBonusValue: number;
+  /** Legacy/raw telemetry retained for compatibility. */
   liveBonusValue: number;
+  practiceTrainingExposure: number;
+  spTrainingExposure: number;
+  friendshipTrainingExposure: number;
+};
+
+export type SongPolicySamplingRun = {
+  purpose: "page-reach" | "transition-lookahead";
+  seedKey: string;
+  trials: number;
+  maxTrials: number;
+  converged: boolean;
+  uncertainAtBudgetLimit?: boolean;
+  probabilities: Record<string, number>;
 };
 
 export type SongPolicyEvaluation = {
@@ -71,6 +105,8 @@ export type SongPolicyEvaluation = {
   songId: string | null;
   /** `null` on the no-purchase policies; the UI renders `policy.noPurchase`. */
   songName: string | null;
+  /** Complete page preserved by a carry action; absent on non-carry policies. */
+  carriedSongIds?: readonly string[];
   valid: boolean;
   /** Exact affordability of a buy policy. Undefined for non-buy actions. */
   affordable?: boolean;
@@ -97,9 +133,13 @@ export type SongPolicyEvaluation = {
   /** This terminal action deliberately ends the active SP hunt. */
   abandonsHunt: boolean;
   huntAbandonReason?: Message;
+  /** PR-6 marginal HUNT vs HOLD comparison. */
+  huntDecision?: HuntDecision;
   decisionVector: DecisionVector;
   nextSectionReadiness: CrossSectionReadinessResult | null;
   valueOutcome: SongValueOutcome;
+  /** MC runs that materially informed this policy. Diagnostics only. */
+  sampling?: SongPolicySamplingRun[];
   reasons: Message[];
 };
 
@@ -127,6 +167,8 @@ export type SongPolicyInput = {
   timingMode?: TimingMode;
   maxSongPages?: number;
   abandonedChaseTargetIds?: readonly string[];
+  /** Section-local persistent HUNT state. When omitted, standalone callers treat the current visible page as the first observation. */
+  huntState?: HuntState | null;
 };
 
 export type SongPolicyDiagnostics = {
@@ -197,6 +239,15 @@ const canonicalSongPolicyInput = (input: SongPolicyInput): string => {
     timingMode: input.timingMode ?? "section-open",
     maxSongPages: input.maxSongPages ?? 4,
     abandonedChaseTargetIds: [...(input.abandonedChaseTargetIds ?? [])].sort(),
+    huntState: input.huntState
+      ? {
+          ...input.huntState,
+          targetIds: [...input.huntState.targetIds].sort(),
+          committedTechniqueCost: TOKEN_KEYS.map(
+            (key) => input.huntState?.committedTechniqueCost[key] ?? 0,
+          ),
+        }
+      : null,
   });
 };
 
@@ -284,9 +335,6 @@ const nowMs = (): number =>
     ? performance.now()
     : Date.now();
 
-const huntProbabilityFloor = (riskProfile: RiskProfile): number =>
-  riskProfile === "safe" ? 0.35 : riskProfile === "greedy" ? 0.15 : 0.25;
-
 export const analyzeSongSelection = (
   input: SongPolicyInput,
 ): SongPolicyResult => {
@@ -327,6 +375,7 @@ export const analyzeSongSelection = (
     timingMode = "section-open",
     maxSongPages = 4,
     abandonedChaseTargetIds = [],
+    huntState: inputHuntState = null,
   } = input;
   const remainingTrainings =
     explicitRemainingTrainings ??
@@ -363,6 +412,48 @@ export const analyzeSongSelection = (
     songsThisSection,
     abandonedChaseTargetIds,
   });
+  const alignedHuntState =
+    plan.mode === "hunt"
+      ? alignHuntState(inputHuntState, plan.chaseTargets.ids)
+      : null;
+  const huntState =
+    plan.mode !== "hunt"
+      ? null
+      : inputHuntState
+        ? alignedHuntState
+        : observeHuntPage({
+            state: alignedHuntState ?? createHuntState(plan.chaseTargets.ids),
+            targetIds: plan.chaseTargets.ids,
+            visibleSongIds: visibleSongs.map((song) => song.id),
+            pageKey: `standalone:${concertIndex}:${nextSongCycle}`,
+          });
+  const huntTargetTrainingExposure =
+    plan.mode === "hunt"
+      ? Math.max(
+          0,
+          ...allReserveSongs
+            .filter((song) => isChaseTarget(song, plan))
+            .map((song) => {
+              if (remainingTrainings) {
+                return structuralTrainingValue(
+                  song.practiceBonus ?? "",
+                  remainingTrainings,
+                  friendshipSongMultiplier,
+                );
+              }
+              const gain = song.roles?.includes("sp3-target")
+                ? 3
+                : song.roles?.includes("sp2-target")
+                  ? 2
+                  : 0;
+              const horizon =
+                TRAINING_HORIZON_BY_CONCERT[
+                  Math.max(0, Math.min(4, Math.trunc(concertIndex)))
+                ] ?? 0;
+              return gain * horizon * Math.max(1, friendshipSongMultiplier);
+            }),
+        )
+      : 0;
   const protectedReserveSongs = allReserveSongs.filter((song) =>
     isReserveTarget(song, plan),
   );
@@ -376,20 +467,23 @@ export const analyzeSongSelection = (
     visibleSongs,
     reserveSongIds: remainingSongs.map((song) => song.id),
   } as const;
-  const tokenPressure = calculateTokenPressure(
+  const resourceEconomy = buildSharedResourceEconomy({
     tokens,
-    allReserveSongs,
-    generationProfile,
+    currentSongs: remainingSongs,
+    futureSongs,
+    laterSongs,
+    visibleSongIds: visibleSongs.map((song) => song.id),
     plan,
+    concertIndex,
+    timingMode,
+    requiredPurchases:
+      timingMode === "deadline-now"
+        ? Math.max(0, plan.manualGaugeTarget - songsThisSection)
+        : 0,
+    generationProfile,
     reserveFeasibility,
-  );
-  const tokenReservePlan = calculateTokenReservePlan(allReserveSongs, plan, {
-    tokens,
-    feasibility: reserveFeasibility,
-    shadowByKey: Object.fromEntries(
-      tokenPressure.map((pressure) => [pressure.key, pressure.shadowValue]),
-    ),
   });
+  const { tokenPressure, tokenReservePlan } = resourceEconomy;
   diagnostics.tokenPressureMs += nowMs() - pressureStartedAt;
   const policies: SongPolicyEvaluation[] = [];
   const threshold = riskThreshold(riskProfile);
@@ -467,13 +561,14 @@ export const analyzeSongSelection = (
   const activeHuntPrefix = (
     state: "acquired-now" | "preserved" | "carried" | "abandoned",
     probability = 0,
+    huntDecision: HuntDecision | null = null,
   ): number[] => {
     if (plan.mode !== "hunt") return [];
     if (state === "acquired-now") return [3, 1];
     if (state === "carried") return [2, 1];
     if (
       state === "preserved" &&
-      probability >= huntProbabilityFloor(riskProfile)
+      (huntDecision === null || huntDecision.action === "continue-hunt")
     ) {
       return [2, probability];
     }
@@ -497,6 +592,18 @@ export const analyzeSongSelection = (
     }
     return [1, totalAfterAction / pacingTarget];
   };
+
+  const physicalPageActions = enumeratePageActions({
+    tokens,
+    visibleSongs,
+    timingMode,
+    concertIndex,
+  });
+  const physicalActionKeys = new Set(physicalPageActions.map(pageActionKey));
+  const carriedPageAction = physicalPageActions.find(
+    (action) => action.kind === "carry-current-page",
+  );
+  const carriedPageSongIds = canonicalPageSongIds(visibleSongs);
 
   for (const song of visibleSongs) {
     const affordable = canAfford(tokens, song.cost);
@@ -528,8 +635,34 @@ export const analyzeSongSelection = (
     const currentIsVisibleOptional = isVisibleOptionalTarget(song, plan);
     const currentIsOpportunity =
       currentIsChaseTarget || currentIsVisibleOptional;
+    const currentEffects = acquiredEffectsForSong({
+      song,
+      concertIndex,
+      remainingTrainingsByFacility: remainingTrainings,
+      friendshipSongMultiplier,
+    });
+    const currentPracticeTrainingExposure = effectExposure(
+      currentEffects,
+      "practice",
+    );
+    const currentSpTrainingExposure = effectExposure(
+      currentEffects,
+      "sp-training",
+    );
+    const currentFriendshipTrainingExposure = effectExposure(
+      currentEffects,
+      "friendship",
+    );
+    const currentPracticeDecisionValue =
+      currentPracticeTrainingExposure > 0 || concertIndex === 4
+        ? currentPracticeTrainingExposure
+        : (song.practiceValue ?? 0);
+    const currentImmediateTrainingExposure =
+      currentPracticeDecisionValue + currentSpTrainingExposure;
     const immediateActivationPriority =
-      currentIsChaseTarget || song.roles?.includes("friendship-10") === true;
+      currentIsChaseTarget ||
+      (song.roles?.includes("friendship-10") === true &&
+        currentFriendshipTrainingExposure > 0);
     const pacingMissing = Math.max(0, (pacingTarget ?? 0) - totalAfterPurchase);
     const finalGaugeMissing =
       timingMode === "deadline-now"
@@ -544,6 +677,16 @@ export const analyzeSongSelection = (
         totalSongs: totalAfterPurchase,
         songs: nextPool,
       });
+    const postPurchaseDemands = deriveReachableDemands({
+      currentSongs: nextPool,
+      futureSongs,
+      laterSongs,
+      plan: planAfterPurchase,
+      concertIndex,
+      timingMode,
+      requiredPurchases: requiredFuturePurchases,
+    });
+    const nextAnalysisSeedKey = `technique:${concertIndex}:${nextSongCycle}:0`;
     const nextStartedAt = nowMs();
     const next = runAnalysis({
       period,
@@ -555,11 +698,12 @@ export const analyzeSongSelection = (
       reserveSongs: postPurchaseSongs.filter((candidate) =>
         isReserveTarget(candidate, planAfterPurchase),
       ),
+      resourceDemands: postPurchaseDemands,
       objective,
       strategicPlan: planAfterPurchase,
       riskProfile,
       generationProfile,
-      seedKey: `technique:${concertIndex}:${nextSongCycle}:0`,
+      seedKey: nextAnalysisSeedKey,
       trials: analysisTrialBudget,
       minimumSamples: analysisMinimumSamples,
       techniqueMemo: runAnalysisTechniqueMemo,
@@ -578,6 +722,19 @@ export const analyzeSongSelection = (
     const transitionRequiredPurchases = terminalConversionActive
       ? Math.max(1, requiredFuturePurchases)
       : requiredFuturePurchases;
+    const expectedNextTechniqueCost =
+      techniquesToNextSong <= 0
+        ? 0
+        : next.reachProbability * next.averageSuccessSpend + next.expectedWaste;
+    const expectedNextTechniquePurchases =
+      techniquesToNextSong <= 0
+        ? 0
+        : next.reachProbability * techniquesToNextSong +
+          next.failureDepth.reduce(
+            (sum, probability, depth) => sum + probability * depth,
+            0,
+          );
+    const transitionSeedKey = `song-transition:${concertIndex}:${nextSongCycle}`;
     const transitionStartedAt = nowMs();
     const transitionAware = needsTransitionRollout
       ? evaluateTransitionAwareSongPages({
@@ -603,7 +760,7 @@ export const analyzeSongSelection = (
           generationProfile,
           trials: transitionTrialBudget,
           // Common random numbers across visible purchases reduce ranking noise.
-          seedKey: `song-transition:${concertIndex}:${nextSongCycle}`,
+          seedKey: transitionSeedKey,
         })
       : {
           checkpointProbability: 1,
@@ -615,10 +772,13 @@ export const analyzeSongSelection = (
           firstPageTargetAffordableProbability:
             next.reachPrioritySongAffordableProbability,
           expectedPurchases: 0,
-          expectedTechniquePurchases: 0,
+          expectedTechniquePurchases: expectedNextTechniquePurchases,
           expectedLessonSkillPoints: 0,
-          expectedCommittedCost: 0,
-          expectedRetainedTokens: totalCost(afterPurchase),
+          expectedCommittedCost: expectedNextTechniqueCost,
+          expectedRetainedTokens: Math.max(
+            0,
+            totalCost(afterPurchase) - expectedNextTechniqueCost,
+          ),
           expectedRetainedBalance: afterPurchase,
           bestStructuralTierProbability: 0,
           expectedStructuralPurchases: 0,
@@ -629,6 +789,7 @@ export const analyzeSongSelection = (
           trials: 0,
           maxTrials: 0,
           converged: true,
+          uncertainAtBudgetLimit: false,
           exactEnumeration: false as const,
           lawConfidence: "heuristic" as const,
           pageLaw: "uniform" as const,
@@ -735,22 +896,30 @@ export const analyzeSongSelection = (
           ? transitionAware.targetProbability
           : next.reachAnySongAffordableProbability;
       const hardProbability = continuing ? continueHard : stopHard;
+      const huntDecision =
+        plan.mode === "hunt" && !currentIsChaseTarget && huntState
+          ? evaluateHuntDecision({
+              state: huntState,
+              riskProfile,
+              findAndFundProbability: conditionalTarget,
+              targetTrainingExposure: huntTargetTrainingExposure,
+              expectedFutureCommittedCost:
+                transitionAware.expectedCommittedCost,
+              immediateFillerCost: continuing ? totalCost(song.cost) : 0,
+              reserveOpportunityCost: continuing
+                ? shadowPremiumForCost(song.cost, resourceEconomy.shadowPrices)
+                : 0,
+              techniquesToNextSong,
+            })
+          : null;
       const huntAbandonReason: Message | null =
-        plan.mode === "hunt" &&
-        !currentIsChaseTarget &&
-        (techniquesToNextSong >= 5 ||
-          (techniquesToNextSong >= 4 &&
-            conditionalTarget < huntProbabilityFloor(riskProfile)))
-          ? techniquesToNextSong >= 5
-            ? {
-                code: "reason.huntAbandonTechniqueCount",
-                techniques: techniquesToNextSong,
-              }
-            : {
-                code: "reason.huntAbandonBelowFloor",
-                probability: conditionalTarget,
-                floor: huntProbabilityFloor(riskProfile),
-              }
+        huntDecision?.action === "abandon-to-hold"
+          ? {
+              code: "reason.huntAbandonMarginalValue",
+              probability: huntDecision.findAndFundProbability,
+              netValue: huntDecision.netValue,
+              pages: huntDecision.pagesSeenWithoutTarget,
+            }
           : null;
       const abandonsHunt = !continuing && huntAbandonReason !== null;
       const effectivePlanAfterPurchase = abandonsHunt
@@ -780,16 +949,29 @@ export const analyzeSongSelection = (
         next.recommendation === "safe" ||
         next.recommendation === "push" ||
         next.recommendation === "risky";
+      // `risky` is a diagnostic class, not permission to continue. Admission
+      // must use the same profile threshold that ranks the action. Otherwise a
+      // risky rollout below Standard's threshold can invalidate BUY_STOP while
+      // BUY_CONTINUE is itself inadmissible: the F-01 dead zone.
+      const continuationRiskAdmissible =
+        concertIndex === 4
+          ? !finalGaugeHardActive || hardProbability > 0
+          : next.reachProbability >= threshold &&
+            (!finalGaugeHardActive || hardProbability >= threshold);
       // The generic technique rollout may still say PUSH after a song that has
       // already satisfied the strategic plan (HOLD, final gate closed, etc.).
       // The invariant must compare against the effective post-purchase policy,
       // not that lower-level raw recommendation.
       const effectivePostPurchaseWantsContinuation =
-        postPurchaseWantsContinuation && !normalContinuationForbidden;
+        postPurchaseWantsContinuation &&
+        continuationRiskAdmissible &&
+        !normalContinuationForbidden;
       const actionMatchesPostPurchase = continuing
         ? effectivePostPurchaseWantsContinuation
         : abandonsHunt || !effectivePostPurchaseWantsContinuation;
+      const physicalAction = pageActionKey({ kind: action, songId: song.id });
       const normalValid =
+        physicalActionKeys.has(physicalAction) &&
         affordable &&
         terminalClosureValid &&
         !normalPurchaseForbidden &&
@@ -882,6 +1064,7 @@ export const analyzeSongSelection = (
                 ? "preserved"
                 : "abandoned",
             conditionalTarget,
+            huntDecision,
           ),
           ...pacingDecisionPrefix(
             totalAfterPurchase,
@@ -896,11 +1079,22 @@ export const analyzeSongSelection = (
           ...(nextSectionReadiness?.decisionVector ?? []),
         ],
         structural: tier,
+        // Guaranteed value on the page now. This is deliberately separated
+        // from prospective MC so a future 1-point expected-value wobble cannot
+        // make Guts +1 beat Speed +1 under a speed/wit profile.
+        certain: [
+          // Only material deterministic exposure differences outrank future
+          // projections. A 20-exposure band makes the replay's Speed +1 vs
+          // Guts +1 distinction visible without making every small stat
+          // preference dominate reserve economics.
+          Math.floor(currentImmediateTrainingExposure / 20),
+          Math.floor(currentFriendshipTrainingExposure / 20),
+        ],
         continuation: continuing
           ? [
               ...(finalGaugeHardActive ? [hardProbability] : []),
-              concertIndex === 4 ? 0 : (song.practiceValue ?? 0),
-              concertIndex === 4 ? 0 : (song.liveValue ?? 0),
+              currentImmediateTrainingExposure,
+              currentFriendshipTrainingExposure,
               25 + transitionAware.expectedLessonSkillPoints,
               intermediateGreatSuccessStatValue(policyGreatSuccess),
               conditionalTarget,
@@ -909,8 +1103,8 @@ export const analyzeSongSelection = (
               continuationCoverage,
             ]
           : [
-              concertIndex === 4 ? 0 : (song.practiceValue ?? 0),
-              concertIndex === 4 ? 0 : (song.liveValue ?? 0),
+              currentImmediateTrainingExposure,
+              currentFriendshipTrainingExposure,
               25,
               intermediateGreatSuccessStatValue(policyGreatSuccess),
               currentIsOpportunity
@@ -930,6 +1124,14 @@ export const analyzeSongSelection = (
       };
       const reasons: Message[] = [...baseReasons];
       if (abandonsHunt && huntAbandonReason) reasons.push(huntAbandonReason);
+      if (continuing && huntDecision?.action === "continue-hunt") {
+        reasons.push({
+          code: "reason.huntContinueMarginalValue",
+          probability: huntDecision.findAndFundProbability,
+          netValue: huntDecision.netValue,
+          pages: huntDecision.pagesSeenWithoutTarget,
+        });
+      }
       if (continuing && huntAbandonReason) {
         reasons.push({
           code: "reason.huntContinuationRefused",
@@ -952,6 +1154,11 @@ export const analyzeSongSelection = (
         reasons.push({
           code: "reason.nextSectionValue",
           friendshipBonus: nextSectionReadiness.expectedFriendshipBonus,
+          friendshipTrainingExposure:
+            nextSectionReadiness.expectedFriendshipTrainingExposure,
+          spTrainingExposure: nextSectionReadiness.expectedSpTrainingExposure,
+          practiceTrainingExposure:
+            nextSectionReadiness.expectedPracticeTrainingExposure,
           lessonSkillPoints: nextSectionReadiness.expectedLessonSkillPoints,
           horizonSections: nextSectionReadiness.horizonSections,
         });
@@ -1025,6 +1232,7 @@ export const analyzeSongSelection = (
         postPurchaseObjective: effectivePostPurchaseObjective,
         abandonsHunt,
         huntAbandonReason: huntAbandonReason ?? undefined,
+        huntDecision: huntDecision ?? undefined,
         decisionVector: affordable
           ? decisionVector
           : { ...decisionVector, hard: 0, riskAdmissible: 0 },
@@ -1040,111 +1248,146 @@ export const analyzeSongSelection = (
           practiceBonusValue:
             concertIndex === 4 ? 0 : (song.practiceValue ?? 0),
           liveBonusValue: concertIndex === 4 ? 0 : (song.liveValue ?? 0),
+          practiceTrainingExposure: currentPracticeTrainingExposure,
+          spTrainingExposure: currentSpTrainingExposure,
+          friendshipTrainingExposure: currentFriendshipTrainingExposure,
         },
+        sampling: [
+          {
+            purpose: "page-reach",
+            seedKey: nextAnalysisSeedKey,
+            trials: next.trials,
+            maxTrials: next.maxTrials,
+            converged: next.converged,
+            uncertainAtBudgetLimit: next.uncertainAtBudgetLimit,
+            probabilities: {
+              pageReachProbability: next.reachProbability,
+              totalFindAndFundProbability: immediateTarget,
+            },
+          },
+          ...(transitionAware.trials > 0
+            ? [
+                {
+                  purpose: "transition-lookahead" as const,
+                  seedKey: transitionSeedKey,
+                  trials: transitionAware.trials,
+                  maxTrials: transitionAware.maxTrials,
+                  converged: transitionAware.converged,
+                  uncertainAtBudgetLimit:
+                    transitionAware.uncertainAtBudgetLimit,
+                  probabilities: {
+                    firstPageReachProbability:
+                      transitionAware.firstPageReachProbability,
+                    targetProbabilityAcrossHorizon:
+                      transitionAware.targetProbability,
+                    checkpointProbability:
+                      transitionAware.checkpointProbability,
+                  },
+                },
+              ]
+            : []),
+        ],
         reasons,
       };
     };
 
     policies.push(makeBuyPolicy("buy-stop"));
     policies.push(makeBuyPolicy("buy-continue"));
+  }
 
-    const carry = evaluateExposedCarry({
-      concertIndex,
-      timingMode,
-      tokens,
-      song,
-      totalSongs,
-      plan,
-    });
-    const delayPenalty =
-      carry.delayClass === "structural"
-        ? 1
-        : carry.delayClass === "friendship"
-          ? 1
-          : carry.delayClass === "minor"
-            ? 1
-            : 0;
-    const carryTotal = totalSongs + 1;
-    const carryBalance = carry.delayedBalance ?? tokens;
+  if (carriedPageAction?.kind === "carry-current-page") {
+    const carryBalance = applyPromotionalLiveTransition(tokens, concertIndex);
     const carryCapacity = capacityFor(
       carryBalance,
-      nextPool,
-      Math.max(0, 18 - carryTotal),
+      remainingSongs,
+      Math.max(0, 18 - totalSongs),
     );
     const carryStatus16 = statusFor({
-      totalSongs: carryTotal,
+      totalSongs,
       requiredSongs: 16,
       balance: carryBalance,
-      pool: nextPool,
+      pool: remainingSongs,
       timingMode: "section-open",
       capacity: carryCapacity,
     });
     const carryStatus18 = statusFor({
-      totalSongs: carryTotal,
+      totalSongs,
       requiredSongs: 18,
       balance: carryBalance,
-      pool: nextPool,
+      pool: remainingSongs,
       timingMode: "section-open",
       capacity: carryCapacity,
     });
     const carryCoverage = evaluatePageCoverage(
-      carry.delayedBalance ?? tokens,
-      nextPool,
+      carryBalance,
+      remainingSongs,
       plan,
     );
+    const visibleChaseTarget = visibleSongs.some((song) =>
+      isChaseTarget(song, plan),
+    );
+    const visibleOpportunity = visibleSongs.some(
+      (song) =>
+        isChaseTarget(song, plan) || isVisibleOptionalTarget(song, plan),
+    );
+    const bestVisibleTier = Math.max(
+      0,
+      ...visibleSongs.map((song) => structuralTier(song, plan)),
+    );
     const carryCrossStartedAt = nowMs();
-    const carryNextSectionReadiness =
-      carry.valid && timingMode === "deadline-now" && concertIndex < 4
-        ? evaluateCrossSectionReadiness({
-            completedConcertIndex: concertIndex,
-            currentPeriod: period,
-            balanceBeforeLive: tokens,
-            currentPool: nextPool,
-            futureSongs,
-            laterSongs,
-            totalSongsBeforeNextSection: totalSongs,
-            carriedSong: song,
-            riskProfile,
-            generationProfile,
-            trials: crossSectionTrialBudget,
-            techniqueMemo: crossSectionTechniqueMemo,
-            seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
-          })
-        : null;
+    const carryNextSectionReadiness = evaluateCrossSectionReadiness({
+      completedConcertIndex: concertIndex,
+      currentPeriod: period,
+      currentFirstOfferPeriod: firstOfferPeriod,
+      balanceBeforeLive: tokens,
+      currentPool: remainingSongs,
+      futureSongs,
+      laterSongs,
+      totalSongsBeforeNextSection: totalSongs,
+      carriedPage: visibleSongs,
+      riskProfile,
+      generationProfile,
+      trials: crossSectionTrialBudget,
+      techniqueMemo: crossSectionTechniqueMemo,
+      seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
+    });
     diagnostics.crossSectionMs += nowMs() - carryCrossStartedAt;
     policies.push({
-      id: `${song.id}:carry-page`,
+      id: `carry-page:${carriedPageSongIds.join(",")}`,
       action: "carry-page",
-      songId: song.id,
-      songName: song.name,
-      valid: carry.valid,
+      songId: null,
+      songName: visibleSongs.map((song) => song.name).join(" / "),
+      carriedSongIds: carriedPageAction.songIds,
+      valid: true,
       overrideEligible: false,
       score: 0,
-      nextSongProbability: carry.valid ? 1 : 0,
-      priorityAffordableProbability:
-        carry.valid && currentIsOpportunity ? 1 : 0,
+      nextSongProbability:
+        carryNextSectionReadiness?.targetProbability ??
+        (visibleOpportunity ? carryCoverage.planTargetProbability : 0),
+      priorityAffordableProbability: visibleOpportunity ? 1 : 0,
       greatSuccessProbability: isGreatSuccess(concertIndex, songsThisSection)
         ? 1
         : 0,
       checkpoint16Status: carryStatus16.status,
       checkpoint18Status: carryStatus18.status,
-      finalGateStatus: concertIndex === 4 ? "failed" : "open",
-      conditionalPagesProbability: 1,
+      finalGateStatus: "open",
+      conditionalPagesProbability:
+        carryNextSectionReadiness?.targetProbability ?? 1,
       exactPageEnumeration: true,
       lateFailureProbability: 0,
       expectedWaste: 0,
-      criticalCost: totalCost(song.cost),
+      criticalCost: 0,
       continuationRecommendation: null,
-      abandonsHunt: plan.mode === "hunt" && !currentIsChaseTarget,
+      abandonsHunt: plan.mode === "hunt" && !visibleChaseTarget,
       huntAbandonReason:
-        plan.mode === "hunt" && !currentIsChaseTarget
+        plan.mode === "hunt" && !visibleChaseTarget
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
       decisionVector: {
-        hard: carry.valid ? 1 : 0,
-        riskAdmissible: carry.affordableAfterLive ? 1 : 0,
+        hard: 1,
+        riskAdmissible: 1,
         prospective: [
-          ...activeHuntPrefix(currentIsChaseTarget ? "carried" : "abandoned"),
+          ...activeHuntPrefix(visibleChaseTarget ? "carried" : "abandoned"),
           ...pacingDecisionPrefix(totalSongs, false, 0),
           0,
           intermediateGreatSuccessStatValue(
@@ -1152,35 +1395,34 @@ export const analyzeSongSelection = (
           ),
           ...(carryNextSectionReadiness?.decisionVector ?? []),
         ],
-        // Carrying a filler saves one Technique but does not create structural
-        // song value. The old floor of 1 could beat the concrete 35-stat Great
-        // Success counterfactual before those outcomes were compared.
-        structural: Math.max(0, tier - delayPenalty),
+        structural: bestVisibleTier,
         continuation: [
-          currentIsOpportunity ? 1 : carryCoverage.planTargetProbability,
+          visibleOpportunity ? 1 : carryCoverage.planTargetProbability,
           carryCoverage.anyAffordableProbability,
           carryCoverage.bestStructuralTier,
-          carry.savedInheritedTechniques,
+          1,
           intermediateGreatSuccessStatValue(
             isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
           ),
         ],
-        retainedTokens: carry.delayedBalance
-          ? totalCost(carry.delayedBalance)
-          : -1,
-        committedCost: totalCost(song.cost),
-        tieId: `${song.id}:carry-page`,
+        retainedTokens: totalCost(carryBalance),
+        committedCost: 0,
+        tieId: `carry-page:${carriedPageSongIds.join(",")}`,
       },
       nextSectionReadiness: carryNextSectionReadiness,
       valueOutcome: {
-        lessonSkillPoints: 25,
+        lessonSkillPoints: 0,
         greatSuccessStatGain: 0,
-        practiceBonusValue: song.practiceValue ?? 0,
-        liveBonusValue: song.liveValue ?? 0,
+        practiceBonusValue: 0,
+        liveBonusValue: 0,
+        practiceTrainingExposure: 0,
+        spTrainingExposure: 0,
+        friendshipTrainingExposure: 0,
       },
       reasons: [
         planReasonMessage(plan),
-        ...carry.reasons,
+        { code: "carry.savesOneInheritedTechnique" },
+        { code: "carry.creditCommonToBothBranches" },
         ...(carryNextSectionReadiness
           ? ([
               {
@@ -1192,17 +1434,26 @@ export const analyzeSongSelection = (
                 code: "reason.carryNextSectionValue",
                 friendshipBonus:
                   carryNextSectionReadiness.expectedFriendshipBonus,
+                friendshipTrainingExposure:
+                  carryNextSectionReadiness.expectedFriendshipTrainingExposure,
+                spTrainingExposure:
+                  carryNextSectionReadiness.expectedSpTrainingExposure,
+                practiceTrainingExposure:
+                  carryNextSectionReadiness.expectedPracticeTrainingExposure,
                 lessonSkillPoints:
                   carryNextSectionReadiness.expectedLessonSkillPoints,
               },
             ] satisfies Message[])
           : []),
-        { code: "reason.carriedSongLessonSkillPoints", points: 25 },
       ],
     });
   }
 
-  if (timingMode === "deadline-now" && concertIndex < 4) {
+  if (
+    physicalActionKeys.has("stop-no-page") &&
+    timingMode === "deadline-now" &&
+    concertIndex < 4
+  ) {
     const stopCapacity = capacityFor(
       tokens,
       remainingSongs,
@@ -1307,6 +1558,9 @@ export const analyzeSongSelection = (
         greatSuccessStatGain: 0,
         practiceBonusValue: 0,
         liveBonusValue: 0,
+        practiceTrainingExposure: 0,
+        spTrainingExposure: 0,
+        friendshipTrainingExposure: 0,
       },
       reasons: [
         planReasonMessage(plan),
@@ -1332,6 +1586,8 @@ export const analyzeSongSelection = (
                 code: "reason.stopNextSectionFriendship",
                 friendshipBonus:
                   stopNextSectionReadiness.expectedFriendshipBonus,
+                friendshipTrainingExposure:
+                  stopNextSectionReadiness.expectedFriendshipTrainingExposure,
                 horizonSections: stopNextSectionReadiness.horizonSections,
               },
             ] satisfies Message[])
@@ -1407,6 +1663,9 @@ export const analyzeSongSelection = (
         greatSuccessStatGain: 0,
         practiceBonusValue: 0,
         liveBonusValue: 0,
+        practiceTrainingExposure: 0,
+        spTrainingExposure: 0,
+        friendshipTrainingExposure: 0,
       },
       reasons: greatSuccessSecured
         ? ([
@@ -1433,6 +1692,28 @@ export const analyzeSongSelection = (
     const bestVisibleIsOpportunity =
       isChaseTarget(bestVisible, plan) ||
       isVisibleOptionalTarget(bestVisible, plan);
+    const bestVisibleEffects = acquiredEffectsForSong({
+      song: bestVisible,
+      concertIndex,
+      remainingTrainingsByFacility: remainingTrainings,
+      friendshipSongMultiplier,
+    });
+    const bestVisiblePracticeExposure = effectExposure(
+      bestVisibleEffects,
+      "practice",
+    );
+    const bestVisibleSpExposure = effectExposure(
+      bestVisibleEffects,
+      "sp-training",
+    );
+    const bestVisibleFriendshipExposure = effectExposure(
+      bestVisibleEffects,
+      "friendship",
+    );
+    const bestVisibleImmediateExposure =
+      (bestVisiblePracticeExposure > 0 || concertIndex === 4
+        ? bestVisiblePracticeExposure
+        : (bestVisible.practiceValue ?? 0)) + bestVisibleSpExposure;
     const currentCapacity = capacityFor(
       tokens,
       remainingSongs,
@@ -1463,11 +1744,16 @@ export const analyzeSongSelection = (
     const waitHuntAbandonReason =
       plan.mode === "hunt" &&
       !visibleChaseTarget &&
+      (huntState?.pagesSeenWithoutTarget ?? 0) >= 3 &&
       huntContinuationPolicies.length > 0 &&
       huntContinuationPolicies.every((policy) => policy.huntAbandonReason)
         ? huntContinuationPolicies[0].huntAbandonReason
         : undefined;
     const waitAbandonsHunt = waitHuntAbandonReason !== undefined;
+    const waitHuntDecision = waitAbandonsHunt
+      ? huntContinuationPolicies.find((policy) => policy.huntDecision)
+          ?.huntDecision
+      : undefined;
     const missing = missingTokens(tokens, bestVisible);
     const tier = structuralTier(bestVisible, plan);
     const bestVisibleAffordable = canAfford(tokens, bestVisible.cost);
@@ -1528,6 +1814,7 @@ export const analyzeSongSelection = (
       continuationRecommendation: null,
       abandonsHunt: waitAbandonsHunt,
       huntAbandonReason: waitHuntAbandonReason,
+      huntDecision: waitHuntDecision,
       decisionVector: {
         hard: 1,
         riskAdmissible: 1,
@@ -1542,6 +1829,13 @@ export const analyzeSongSelection = (
           bestVisibleIsOpportunity && canAfford(tokens, bestVisible.cost)
             ? Math.max(0, tier - 1)
             : tier,
+        // Waiting preserves the current page, so it retains the same certain
+        // visible-song option value while allowing reserve/future criteria to
+        // decide whether buying now is actually desirable.
+        certain: [
+          Math.floor(bestVisibleImmediateExposure / 20),
+          Math.floor(bestVisibleFriendshipExposure / 20),
+        ],
         continuation: [
           bestVisibleIsOpportunity ? 1 : coverage.planTargetProbability,
           coverage.anyAffordableProbability,
@@ -1558,6 +1852,9 @@ export const analyzeSongSelection = (
         greatSuccessStatGain: 0,
         practiceBonusValue: 0,
         liveBonusValue: 0,
+        practiceTrainingExposure: 0,
+        spTrainingExposure: 0,
+        friendshipTrainingExposure: 0,
       },
       reasons: [
         planReasonMessage(plan),

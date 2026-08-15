@@ -7,7 +7,7 @@ import { Song, UnlockPhase } from "@glcp/core";
 
 type SongsPanelProps = {
   availableSongs: Song[];
-  carryoverSongIds: string[] | null;
+  carriedPageSongIds: string[] | null;
   concert: (typeof CONCERTS)[number];
   lockedSongs: Song[];
   ownedBonusTotals: { friendship: number; speciality: number; event: number };
@@ -28,7 +28,7 @@ type SongsPanelProps = {
 
 export function SongsPanel({
   availableSongs,
-  carryoverSongIds,
+  carriedPageSongIds,
   concert,
   lockedSongs,
   ownedBonusTotals,
@@ -68,7 +68,7 @@ export function SongsPanel({
           }`}
         >
           {songSelectionOpen
-            ? carryoverSongIds
+            ? carriedPageSongIds
               ? L.songs.carryover
               : L.songs.lectureSeule
             : L.songs.ownedCount(

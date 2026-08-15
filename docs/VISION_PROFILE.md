@@ -49,7 +49,7 @@ Technique cost slots always use this order:
 |     3 | Visual  |
 |     4 | Mental  |
 
-Profile schema v5 contains the snapshot workflow and supervised numeric
+Profile schema v6 contains the snapshot workflow and supervised numeric
 learning. Older profiles remain importable: the normaliser preserves compatible
 regions, thresholds, hotkey, and overlay settings while discarding obsolete
 automatic-detection branches.
@@ -89,6 +89,17 @@ and then restricts candidates to song IDs still present in the solver pool.
 | `ocr.maxTokenValue`          |     400 | Out-of-range rejection; scenario cap grows from 200 to 400        |
 | `ocr.threshold`              |  `auto` | General preprocessing; learned numeric crops use the source image |
 | `ocr.invert`                 |  `auto` | Automatic polarity attempts                                       |
+
+Persisted profiles are normalised with `ocr.maxTokenValue >= 400`. This is a
+one-way safety migration for profiles created when the UI still used 250 as an
+OCR/calibration ceiling; values such as 263 or 283 are valid in later Grand Live
+sections and must be accepted by both recognition and supervised learning.
+
+A single sharp token discontinuity (for example `263 -> 6`) is not automatically
+applied even when OCR confidence is high. The draft remains editable and the
+user must either correct the value or explicitly confirm that the change is
+intentional. Broad multi-colour drift remains reviewable rather than hard-blocked
+because it can represent genuine gameplay performed outside OCR.
 
 Do not compensate for an incorrect rectangle by drastically lowering a
 threshold. Recalibrate the region first. `scale` remains useful for the general

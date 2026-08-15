@@ -55,6 +55,7 @@ import {
   buildQuickTechniqueCost,
   buildSolverStateContext,
   canAfford,
+  canonicalNumberKey,
   createTechniqueSimulationMemo,
   evaluateTechniqueStrategy,
   getDuoSplitSecondaryToken,
@@ -62,6 +63,12 @@ import {
   runAnalysis,
   subtractCost,
   totalCost,
+  alignHuntState,
+  huntPageKey,
+  markHuntStatus,
+  observeHuntPage,
+  recordHuntFillerPurchase,
+  recordHuntTechniquePurchase,
 } from "@glcp/core";
 import { calculateOfferPercentile, calculateRunPulse } from "@glcp/core";
 import type {
@@ -71,6 +78,7 @@ import type {
   GenerationProfile,
   RiskProfile,
   TokenKey,
+  HuntState,
 } from "@glcp/core";
 import { analyzeSongSelection, type SongPolicyResult } from "@glcp/core";
 import {
@@ -111,11 +119,14 @@ import {
   type TechniqueChoiceAssessment,
 } from "@glcp/core";
 import {
+  analysisProbabilityBreakdown,
+  analysisSamplingTrace,
   appendDecisionLog,
   initializeDecisionLog,
   loggedTrackedBalanceAfterConcert,
   loggedBalanceAfterPurchase,
   nextDecisionLogId,
+  samplingTraceFromRuns,
   type DecisionLogChoice,
   type DecisionLogEntryDraft,
   type DecisionLogState,
@@ -175,7 +186,7 @@ export default function App({
   // means the page follows the current concert period.
   const [techniqueOfferPeriod, setTechniqueOfferPeriod] =
     useState<Period | null>(null);
-  const [carryoverSongIds, setCarryoverSongIds] = useState<string[] | null>(
+  const [carriedPageSongIds, setCarriedPageSongIds] = useState<string[] | null>(
     null,
   );
   const [dynamicSpending, setDynamicSpending] = useState(false);
@@ -183,6 +194,7 @@ export default function App({
   const [abandonedChaseTargetIds, setAbandonedChaseTargetIds] = useState<
     Set<string>
   >(new Set());
+  const [huntState, setHuntState] = useState<HuntState | null>(null);
   const [runPulseBeta, setRunPulseBeta] = useState(false);
   const [runPulseEvents, setRunPulseEvents] = useState<RunPulseEvent[]>([]);
   const [runPulseStartedAtConcert, setRunPulseStartedAtConcert] = useState<
@@ -246,19 +258,21 @@ export default function App({
     ? 0
     : Math.max(0, target - techniquesDone);
   const songSelectionOpen =
-    !patternUnsupported && (remaining === 0 || carryoverSongIds !== null);
+    !patternUnsupported && (remaining === 0 || carriedPageSongIds !== null);
   const manualGaugeTarget = manualSongsForGreatSuccess(concertIndex);
   const automaticGaugeSongs = automaticGaugeSongsForConcert(concertIndex);
   const gaugeSongs = gaugeSongCount(concertIndex, songsThisSection);
   const tokenCap = tokenCapForSection(concertIndex);
   const selectedOfferIds =
-    visibleSongIds.size > 0 ? visibleSongIds : new Set(carryoverSongIds ?? []);
+    visibleSongIds.size > 0
+      ? visibleSongIds
+      : new Set(carriedPageSongIds ?? []);
   const selectionSongs = availableSongs
     .filter((song) => selectedOfferIds.has(song.id))
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
   const expectedOfferCount =
-    carryoverSongIds !== null && visibleSongIds.size === 0
-      ? carryoverSongIds.length
+    carriedPageSongIds !== null && visibleSongIds.size === 0
+      ? carriedPageSongIds.length
       : Math.min(3, availableSongs.length);
   const songOfferComplete =
     expectedOfferCount > 0 && selectionSongs.length === expectedOfferCount;
@@ -278,7 +292,7 @@ export default function App({
         period: concert.period,
         techniqueOfferPeriod,
         songCycle,
-        techniquesToNextSong: carryoverSongIds ? 0 : remaining,
+        techniquesToNextSong: carriedPageSongIds ? 0 : remaining,
         tokens,
         ownedSongIds: Array.from(ownedSongs),
         activeSongIds: Array.from(activeSongIds),
@@ -303,7 +317,7 @@ export default function App({
       techniqueOfferPeriod,
       songCycle,
       remaining,
-      carryoverSongIds,
+      carriedPageSongIds,
       tokens,
       ownedSongs,
       activeSongIds,
@@ -354,9 +368,10 @@ export default function App({
     generationProfile,
     timingMode,
     Array.from(abandonedChaseTargetIds),
+    huntState,
     Array.from(ownedSongs),
     Array.from(activeSongIds),
-    carryoverSongIds,
+    carriedPageSongIds,
   );
   const isStale =
     Boolean(result || songPolicy) && currentSignature !== analyzedSignature;
@@ -420,7 +435,7 @@ export default function App({
     if (
       !runPulseBeta ||
       workflowMode !== "live" ||
-      carryoverSongIds !== null ||
+      carriedPageSongIds !== null ||
       !songOfferComplete
     ) {
       return;
@@ -464,8 +479,9 @@ export default function App({
     timingMode,
     tokens: { ...tokens },
     visibleSongIds: Array.from(visibleSongIds),
-    carryoverSongIds: carryoverSongIds ? [...carryoverSongIds] : null,
+    carryoverSongIds: carriedPageSongIds ? [...carriedPageSongIds] : null,
     abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
+    huntState,
     solverMode,
     riskProfile: effectiveRiskProfile,
     generationProfile: effectiveGenerationProfile,
@@ -474,6 +490,10 @@ export default function App({
       id: strategicPlan.id,
       mode: strategicPlan.mode,
       label: t(planLabelMessage(strategicPlan)),
+    },
+    resourceEconomy: {
+      demands: solverContext.resourceDemands,
+      shadowPrices: solverContext.shadowPrices,
     },
     stateSignature: currentSignature,
     ...overrides,
@@ -555,6 +575,7 @@ export default function App({
         continuationObjective:
           solverMode === "expert" ? analysisObjective : undefined,
         abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
+        huntState,
       });
       const normalPolicyStops = policy.recommended?.action !== "buy-continue";
       const forcedPolicy =
@@ -636,6 +657,7 @@ export default function App({
               postPurchaseObjective: candidate.postPurchaseObjective,
               abandonsHunt: candidate.abandonsHunt,
               huntAbandonReason: candidate.huntAbandonReason,
+              huntDecision: candidate.huntDecision,
               checkpoint16Status: candidate.checkpoint16Status,
               checkpoint18Status: candidate.checkpoint18Status,
               finalGateStatus: candidate.finalGateStatus,
@@ -648,14 +670,25 @@ export default function App({
                     checkpointProbability: nextSection.checkpointProbability,
                     friendship10Probability:
                       nextSection.friendship10Probability,
+                    effectiveFriendship10Probability:
+                      nextSection.effectiveFriendship10Probability,
                     expectedFriendshipBonus:
                       nextSection.expectedFriendshipBonus,
+                    expectedFriendshipTrainingExposure:
+                      nextSection.expectedFriendshipTrainingExposure,
+                    expectedSpTrainingExposure:
+                      nextSection.expectedSpTrainingExposure,
+                    expectedPracticeTrainingExposure:
+                      nextSection.expectedPracticeTrainingExposure,
                     expectedLessonSkillPoints:
                       nextSection.expectedLessonSkillPoints,
                     expectedRetainedBalance: {
                       ...nextSection.expectedRetainedBalance,
                     },
                   }
+                : undefined,
+              sampling: candidate.sampling
+                ? samplingTraceFromRuns(candidate.sampling)
                 : undefined,
               decisionVector: {
                 hard: candidate.decisionVector.hard,
@@ -678,33 +711,45 @@ export default function App({
     }
 
     const effectiveObjective = solverContext.effectiveObjective;
+    const techniqueSeedKey = `technique:${concertIndex}:${songCycle}:${techniquesDone}`;
+    const terminalTechniqueSeedKey = `terminal-technique:${concertIndex}:${songCycle}:${techniquesDone}`;
     const enteredOptions = candidateCosts
       .map((cost, index) => ({ cost, index }))
       .filter(({ cost }) => totalCost(cost) > 0);
     const techniqueMemo = createTechniqueSimulationMemo();
+    const analysisByCanonicalAction = new Map<string, AnalysisResult>();
+    const analyzeCanonicalTechnique = (cost: Balance): AnalysisResult => {
+      const actionKey = canonicalNumberKey(TOKEN_KEYS.map((key) => cost[key]));
+      const cached = analysisByCanonicalAction.get(actionKey);
+      if (cached) return cached;
+      const evaluated = runAnalysis({
+        period: concert.period,
+        firstOfferPeriod: solverContext.firstOfferPeriod,
+        tokens,
+        candidateCost: cost,
+        techniquesRemaining: carriedPageSongIds ? 0 : remaining,
+        songs: songTargets,
+        reserveSongs: protectedReserveSongTargets,
+        resourceDemands: solverContext.resourceDemands,
+        objective: effectiveObjective,
+        strategicPlan,
+        riskProfile: effectiveRiskProfile,
+        generationProfile: effectiveGenerationProfile,
+        nextSongCycle: songCycle,
+        seedKey: techniqueSeedKey,
+        trials: solverMode === "express" ? 7000 : 12000,
+        minimumSamples: solverMode === "express" ? 512 : 1024,
+        techniqueMemo,
+      });
+      analysisByCanonicalAction.set(actionKey, evaluated);
+      return evaluated;
+    };
     const rawAnalyses: OptionAnalysis[] =
       enteredOptions.length > 0
         ? enteredOptions.map(({ cost, index }) => ({
             index,
             cost,
-            result: runAnalysis({
-              period: concert.period,
-              firstOfferPeriod: solverContext.firstOfferPeriod,
-              tokens,
-              candidateCost: cost,
-              techniquesRemaining: carryoverSongIds ? 0 : remaining,
-              songs: songTargets,
-              reserveSongs: protectedReserveSongTargets,
-              objective: effectiveObjective,
-              strategicPlan,
-              riskProfile: effectiveRiskProfile,
-              generationProfile: effectiveGenerationProfile,
-              nextSongCycle: songCycle,
-              seedKey: `technique:${concertIndex}:${songCycle}:${techniquesDone}`,
-              trials: solverMode === "express" ? 7000 : 12000,
-              minimumSamples: solverMode === "express" ? 512 : 1024,
-              techniqueMemo,
-            }),
+            result: analyzeCanonicalTechnique(cost),
           }))
         : [
             {
@@ -714,15 +759,16 @@ export default function App({
                 period: concert.period,
                 firstOfferPeriod: solverContext.firstOfferPeriod,
                 tokens,
-                techniquesRemaining: carryoverSongIds ? 0 : remaining,
+                techniquesRemaining: carriedPageSongIds ? 0 : remaining,
                 songs: songTargets,
                 reserveSongs: protectedReserveSongTargets,
+                resourceDemands: solverContext.resourceDemands,
                 objective: effectiveObjective,
                 strategicPlan,
                 riskProfile: effectiveRiskProfile,
                 generationProfile: effectiveGenerationProfile,
                 nextSongCycle: songCycle,
-                seedKey: `technique:${concertIndex}:${songCycle}:${techniquesDone}`,
+                seedKey: techniqueSeedKey,
                 trials: solverMode === "express" ? 10000 : 18000,
                 minimumSamples: solverMode === "express" ? 512 : 1024,
                 techniqueMemo,
@@ -743,7 +789,7 @@ export default function App({
               id: String(index),
               cost,
             })),
-            techniquesRemaining: carryoverSongIds ? 0 : remaining,
+            techniquesRemaining: carriedPageSongIds ? 0 : remaining,
             nextSongCycle: songCycle,
             currentSongs: songTargets,
             futureSongs: futureSongTargets,
@@ -751,8 +797,18 @@ export default function App({
             plan: strategicPlan,
             riskProfile: effectiveRiskProfile,
             generationProfile: effectiveGenerationProfile,
-            trials: solverMode === "express" ? 180 : 300,
-            seedKey: `terminal-technique:${concertIndex}:${songCycle}:${techniquesDone}`,
+            tokenPressure: pressurePreview,
+            resourceDemands: solverContext.resourceDemands,
+            // PR-3: terminal MC is adaptive. Easy decisions usually stop near
+            // the floor; threshold cases may consume the larger common-random
+            // budget instead of being decided by ~180 independent samples.
+            trials: solverMode === "express" ? 3600 : 7200,
+            minimumSamples: solverMode === "express" ? 192 : 320,
+            // Hotfix v6: terminal MC must never freeze the renderer for tens
+            // of seconds. Confidence is still adaptive; an unresolved duel
+            // returns uncertain-at-budget-limit when the wall-clock guard hits.
+            maxDurationMs: solverMode === "express" ? 900 : 1800,
+            seedKey: terminalTechniqueSeedKey,
           })
         : null;
     const terminalById = new Map(
@@ -780,7 +836,7 @@ export default function App({
         },
       };
     });
-    const ranked = rankObservedTechniques({
+    const rankedCandidates = rankObservedTechniques({
       candidates: analyses.map((analysis) => ({
         id: String(analysis.index ?? "projection"),
         cost: analysis.cost,
@@ -797,7 +853,15 @@ export default function App({
       plan: strategicPlan,
       riskProfile: effectiveRiskProfile,
       tokenPressure: pressurePreview,
-    }).map((candidate) => candidate.payload);
+    });
+    const ranked = rankedCandidates.map((candidate) => candidate.payload);
+    const rankReasonByOptionIndex = new Map(
+      rankedCandidates.flatMap((candidate) =>
+        candidate.payload.index === null
+          ? []
+          : [[candidate.payload.index, candidate.rankReason] as const],
+      ),
+    );
     const recommended = ranked[0];
     setResult(recommended.result);
     setSongPolicy(null);
@@ -894,9 +958,17 @@ export default function App({
             id: `option-${assessment.index + 1}`,
             label: `Option ${assessment.index + 1}`,
             safety: assessment.safety,
+            rankReasonCode:
+              rankReasonByOptionIndex.get(assessment.index) ?? "stable-id",
             cost: candidate ? { ...candidate.cost } : undefined,
             reachProbability: candidate?.result.reachProbability,
             goalProbability: candidate?.result.goalProbability,
+            probabilities: candidate
+              ? analysisProbabilityBreakdown(candidate.result)
+              : undefined,
+            sampling: candidate
+              ? analysisSamplingTrace(candidate.result, techniqueSeedKey)
+              : undefined,
             terminalDecision: candidate?.result.terminalDecision,
             blockingReason: assessment.blocking?.detail,
           };
@@ -981,6 +1053,8 @@ export default function App({
           ownedSongs?: string[];
           activeSongIds?: string[];
           visibleSongIds?: string[];
+          carriedPageSongIds?: string[] | null;
+          /** Legacy v3 session key; migrated to the full-page field. */
           carryoverSongIds?: string[] | null;
           tokens?: Partial<Balance>;
           dynamicSpending?: boolean;
@@ -992,6 +1066,7 @@ export default function App({
           riskProfile?: RiskProfile;
           generationProfile?: GenerationProfile;
           abandonedChaseTargetIds?: string[];
+          huntState?: HuntState | null;
         };
         if (
           session.workflowMode === "manual" ||
@@ -1034,12 +1109,13 @@ export default function App({
           ownedSongIds: session.ownedSongs,
           activeSongIds: session.activeSongIds,
           visibleSongIds: session.visibleSongIds,
-          carryoverSongIds: session.carryoverSongIds,
+          carryoverSongIds:
+            session.carriedPageSongIds ?? session.carryoverSongIds,
         });
         setOwnedSongs(new Set(restoredSongs.ownedSongIds));
         setActiveSongIds(new Set(restoredSongs.activeSongIds));
         setVisibleSongIds(new Set(restoredSongs.visibleSongIds));
-        setCarryoverSongIds(restoredSongs.carryoverSongIds);
+        setCarriedPageSongIds(restoredSongs.carryoverSongIds);
         setAbandonedChaseTargetIds(
           new Set(
             Array.isArray(session.abandonedChaseTargetIds)
@@ -1047,6 +1123,14 @@ export default function App({
               : [],
           ),
         );
+        if (session.huntState && Array.isArray(session.huntState.targetIds)) {
+          const validTargets = session.huntState.targetIds.filter((id) =>
+            validIds.has(id),
+          );
+          setHuntState(alignHuntState(session.huntState, validTargets));
+        } else {
+          setHuntState(null);
+        }
         if (session.tokens && typeof session.tokens === "object") {
           setTokens(
             Object.fromEntries(
@@ -1135,7 +1219,7 @@ export default function App({
         ownedSongs: Array.from(ownedSongs),
         activeSongIds: Array.from(activeSongIds),
         visibleSongIds: Array.from(visibleSongIds),
-        carryoverSongIds,
+        carriedPageSongIds,
         tokens,
         dynamicSpending,
         timingMode,
@@ -1146,6 +1230,7 @@ export default function App({
         riskProfile,
         generationProfile,
         abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
+        huntState,
       }),
     );
   }, [
@@ -1159,7 +1244,7 @@ export default function App({
     ownedSongs,
     activeSongIds,
     visibleSongIds,
-    carryoverSongIds,
+    carriedPageSongIds,
     tokens,
     dynamicSpending,
     timingMode,
@@ -1170,6 +1255,43 @@ export default function App({
     riskProfile,
     generationProfile,
     abandonedChaseTargetIds,
+    huntState,
+  ]);
+
+  useEffect(() => {
+    if (
+      strategicPlan.mode !== "hunt" ||
+      !songSelectionOpen ||
+      !songOfferComplete ||
+      carriedPageSongIds !== null
+    ) {
+      return;
+    }
+    const next = observeHuntPage({
+      state: huntState,
+      targetIds: strategicPlan.chaseTargets.ids,
+      visibleSongIds: selectedSongTargets.map((song) => song.id),
+      pageKey: huntPageKey(concertIndex, songCycle),
+    });
+    if (JSON.stringify(next) !== JSON.stringify(huntState)) {
+      setHuntState(next);
+      setSongPolicy(null);
+      setResult(null);
+    }
+  }, [
+    strategicPlan.id,
+    strategicPlan.mode,
+    strategicPlan.chaseTargets.ids.join("|"),
+    songSelectionOpen,
+    songOfferComplete,
+    carriedPageSongIds,
+    concertIndex,
+    songCycle,
+    selectedSongTargets
+      .map((song) => song.id)
+      .sort()
+      .join("|"),
+    huntState,
   ]);
 
   useEffect(() => {
@@ -1473,12 +1595,13 @@ export default function App({
       ownedSongs: Array.from(ownedSongs),
       activeSongIds: Array.from(activeSongIds),
       visibleSongIds: Array.from(visibleSongIds),
-      carryoverSongIds: carryoverSongIds ? [...carryoverSongIds] : null,
+      carriedPageSongIds: carriedPageSongIds ? [...carriedPageSongIds] : null,
       tokens: { ...tokens },
       runPulseEvents: [...runPulseEvents],
       runPulseStartedAtConcert,
       timingMode,
       abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
+      huntState,
     };
     setHistory((current) => [...current.slice(-19), snapshot]);
   };
@@ -1494,19 +1617,20 @@ export default function App({
     setOwnedSongs(new Set(snapshot.ownedSongs));
     setActiveSongIds(new Set(snapshot.activeSongIds));
     setVisibleSongIds(new Set(snapshot.visibleSongIds));
-    setCarryoverSongIds(snapshot.carryoverSongIds);
+    setCarriedPageSongIds(snapshot.carriedPageSongIds);
     setTokens(snapshot.tokens);
     setRunPulseEvents(snapshot.runPulseEvents);
     setRunPulseStartedAtConcert(snapshot.runPulseStartedAtConcert);
     setTimingMode(snapshot.timingMode);
     setAbandonedChaseTargetIds(new Set(snapshot.abandonedChaseTargetIds));
+    setHuntState(snapshot.huntState);
     setHistory((current) => current.slice(0, -1));
     resetTechniqueOptions();
     setSongPolicy(null);
   };
 
   const recordTechniquePurchase = (optionIndex?: number) => {
-    if (remaining === 0 || carryoverSongIds) return false;
+    if (remaining === 0 || carriedPageSongIds) return false;
     if (dynamicSpending) {
       if (optionIndex === undefined) return false;
       const selectedCost = candidateCosts[optionIndex];
@@ -1514,6 +1638,18 @@ export default function App({
         return false;
       }
     }
+    const alignedTechniqueHuntState =
+      strategicPlan.mode === "hunt"
+        ? alignHuntState(huntState, strategicPlan.chaseTargets.ids)
+        : huntState;
+    const nextTechniqueHuntState =
+      strategicPlan.mode === "hunt" && optionIndex !== undefined
+        ? recordHuntTechniquePurchase(
+            alignedTechniqueHuntState,
+            candidateCosts[optionIndex],
+          )
+        : alignedTechniqueHuntState;
+
     if (optionIndex !== undefined) {
       const assessment = techniqueChoiceAssessments.find(
         (item) => item.index === optionIndex,
@@ -1537,6 +1673,7 @@ export default function App({
           tokens: nextTokens,
           techniquesDone: Math.min(target, techniquesDone + 1),
           techniqueOfferPeriod: null,
+          huntState: nextTechniqueHuntState,
           stateSignature: `${currentSignature}:technique:${optionIndex + 1}`,
         }),
       );
@@ -1552,11 +1689,13 @@ export default function App({
         currentDecisionLogState({
           techniquesDone: Math.min(target, techniquesDone + 1),
           techniqueOfferPeriod: null,
+          huntState: nextTechniqueHuntState,
           stateSignature: `${currentSignature}:technique:untracked`,
         }),
       );
     }
     pushHistory();
+    setHuntState(nextTechniqueHuntState);
     if (dynamicSpending && optionIndex !== undefined) {
       setTokens((current) =>
         subtractCost(current, candidateCosts[optionIndex]),
@@ -1573,7 +1712,7 @@ export default function App({
   const buySong = (song: Song) => {
     if (!songSelectionOpen) return false;
     if (dynamicSpending && !canAfford(tokens, song.cost)) return false;
-    const fromCarryover = carryoverSongIds !== null;
+    const fromCarryover = carriedPageSongIds !== null;
     const assessment = songChoiceAssessments.find(
       (item) => item.songId === song.id,
     );
@@ -1588,6 +1727,31 @@ export default function App({
     if (selectedAbandonPolicy) {
       for (const id of strategicPlan.chaseTargets.ids) {
         nextAbandonedChaseTargets.add(id);
+      }
+    }
+    const boughtChaseTarget =
+      strategicPlan.mode === "hunt" &&
+      strategicPlan.chaseTargets.ids.includes(song.id);
+    const boughtSpTarget =
+      targetById
+        .get(song.id)
+        ?.roles?.some(
+          (role) => role === "sp2-target" || role === "sp3-target",
+        ) === true;
+    if (boughtSpTarget) {
+      nextAbandonedChaseTargets.delete(song.id);
+    }
+    let nextSongHuntState =
+      strategicPlan.mode === "hunt"
+        ? alignHuntState(huntState, strategicPlan.chaseTargets.ids)
+        : huntState;
+    if (boughtChaseTarget || boughtSpTarget) {
+      // Acquisition is a reset boundary: the next plan derives from the pool.
+      nextSongHuntState = null;
+    } else if (strategicPlan.mode === "hunt") {
+      nextSongHuntState = recordHuntFillerPurchase(nextSongHuntState);
+      if (selectedAbandonPolicy) {
+        nextSongHuntState = markHuntStatus(nextSongHuntState, "abandoned");
       }
     }
     const remainingAfterSong = [
@@ -1622,6 +1786,7 @@ export default function App({
         visibleSongIds: [],
         carryoverSongIds: null,
         abandonedChaseTargetIds: Array.from(nextAbandonedChaseTargets),
+        huntState: nextSongHuntState,
         plan: {
           id: planAfterSong.id,
           mode: planAfterSong.mode,
@@ -1632,6 +1797,7 @@ export default function App({
     );
     pushHistory();
     setAbandonedChaseTargetIds(nextAbandonedChaseTargets);
+    setHuntState(nextSongHuntState);
     recordCurrentSongOffer();
     if (runPulseBeta && workflowMode === "live") {
       const targetSong = targetById.get(song.id)!;
@@ -1681,7 +1847,7 @@ export default function App({
       setTechniquesDone(0);
       setSongsThisSection((current) => current + 1);
     }
-    setCarryoverSongIds(null);
+    setCarriedPageSongIds(null);
     setVisibleSongIds(new Set());
     setSongFilter("available");
     resetTechniqueOptions();
@@ -1694,32 +1860,29 @@ export default function App({
     pushHistory();
     setSongCycle((current) => current + 1);
     setTechniquesDone(0);
-    setCarryoverSongIds(null);
+    setCarriedPageSongIds(null);
     resetTechniqueOptions();
     setSongPolicy(null);
   };
 
   /**
-   * v0.22.16 removed the user-facing carry choice. Lessons already displayed in
-   * game survive a Promotional Live, so pressing the concert button carries
-   * whichever page is currently open: a song page keeps every visible song, with
-   * one policy-selected song retained as the solver's projection anchor; a
-   * technique page keeps the period and prices it was generated with, until the
-   * first purchase refreshes the shop.
+   * Lessons already displayed in game survive a Promotional Live. A song page
+   * is therefore persisted as the complete exposed page, not as one song
+   * preselected for an automatic buy. The next section re-evaluates that page
+   * after the verified +10 credit. Technique-page pricing carryover is unchanged.
    */
   const advanceConcert = (): boolean => {
     if (concertTransitionBlock !== null) return false;
 
     const songPageCarried =
       songSelectionOpen && remaining === 0 && songOfferComplete;
-    const carriedSongId = songPageCarried
-      ? (carryoverPolicy?.songId ?? selectionSongs[0]?.id ?? null)
-      : null;
-    if (songPageCarried && !carriedSongId) return false;
-    const carriedSongIds = carriedSongId ? [carriedSongId] : null;
-    const carriedVisibleSongIds = songPageCarried
+    const carriedPageIds = songPageCarried
       ? Array.from(visibleSongIds).slice(0, expectedOfferCount)
-      : [];
+      : null;
+    if (songPageCarried && (!carriedPageIds || carriedPageIds.length === 0)) {
+      return false;
+    }
+    const carriedVisibleSongIds = carriedPageIds ?? [];
     const techniquePageVisible = !songSelectionOpen && remaining > 0;
     const nextTechniqueOfferPeriod = techniqueOfferPeriodAfterConcert({
       currentPeriod: concert.period,
@@ -1728,12 +1891,9 @@ export default function App({
       songPageCarried,
     });
     const nextConcertIndex = concertIndex + 1;
-    const nextAbandonedChaseTargets = new Set(abandonedChaseTargetIds);
-    if (displayedSongPolicy?.abandonsHunt) {
-      for (const id of strategicPlan.chaseTargets.ids) {
-        nextAbandonedChaseTargets.add(id);
-      }
-    }
+    // PR-6: HUNT abandonment is section-local. A new section starts with a
+    // fresh chase state and a fresh abandoned-target set.
+    const nextAbandonedChaseTargets = new Set<string>();
     const nextUnlockedTargetIds = new Set(
       SONGS.filter(
         (candidate) =>
@@ -1787,8 +1947,9 @@ export default function App({
         timingMode: "section-open",
         tokens: nextLoggedTokens,
         visibleSongIds: carriedVisibleSongIds,
-        carryoverSongIds: carriedSongIds,
+        carryoverSongIds: carriedPageIds,
         abandonedChaseTargetIds: Array.from(nextAbandonedChaseTargets),
+        huntState: null,
         plan: {
           id: nextConcertPlan.id,
           mode: nextConcertPlan.mode,
@@ -1799,6 +1960,7 @@ export default function App({
     );
     pushHistory();
     setAbandonedChaseTargetIds(nextAbandonedChaseTargets);
+    setHuntState(null);
     if (runPulseBeta && workflowMode === "live") {
       const event: PulseConcertEvent = {
         id: `concert:${concertIndex}`,
@@ -1815,7 +1977,7 @@ export default function App({
     setActiveSongIds(
       (current) => new Set([...current, ...Array.from(ownedSongs)]),
     );
-    setCarryoverSongIds(carriedSongIds);
+    setCarriedPageSongIds(carriedPageIds);
     setTechniqueOfferPeriod(nextTechniqueOfferPeriod);
     if (dynamicSpending) {
       setTokens((current) =>
@@ -1905,7 +2067,7 @@ export default function App({
       const recognizedIds = (intake.recognizedSongIds ?? [])
         .filter((songId: string) => availableIds.has(songId))
         .slice(0, 3);
-      if (carryoverSongIds === null) setTechniquesDone(target);
+      if (carriedPageSongIds === null) setTechniquesDone(target);
       setVisibleSongIds(new Set(recognizedIds));
       setSongFilter("available");
     }
@@ -1934,10 +2096,11 @@ export default function App({
     setOwnedSongs(new Set());
     setActiveSongIds(new Set());
     setVisibleSongIds(new Set());
-    setCarryoverSongIds(null);
+    setCarriedPageSongIds(null);
     setDynamicSpending(false);
     setTimingMode("section-open");
     setAbandonedChaseTargetIds(new Set());
+    setHuntState(null);
     setRunPulseEvents([]);
     setRunPulseStartedAtConcert(runPulseBeta ? 0 : null);
     setHistory([]);
@@ -1958,8 +2121,10 @@ export default function App({
     setTechniquesDone(0);
     setSongsThisSection(0);
     setVisibleSongIds(new Set());
-    setCarryoverSongIds(null);
+    setCarriedPageSongIds(null);
     setTimingMode("section-open");
+    setAbandonedChaseTargetIds(new Set());
+    setHuntState(null);
     resetTechniqueOptions();
     setSongPolicy(null);
   };
@@ -1984,7 +2149,7 @@ export default function App({
   };
 
   const toggleVisibleSong = (id: string) => {
-    if (!songSelectionOpen || carryoverSongIds !== null) return;
+    if (!songSelectionOpen || carriedPageSongIds !== null) return;
     setVisibleSongIds((current) => {
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
@@ -2170,7 +2335,7 @@ export default function App({
     availableSongs,
     canCarryVisibleSongPage,
     carryoverPolicy,
-    carryoverSongIds,
+    carriedPageSongIds,
     concert,
     concertIndex,
     concertTransitionBlock,
@@ -2326,7 +2491,7 @@ export default function App({
 
         <SongsPanel
           availableSongs={availableSongs}
-          carryoverSongIds={carryoverSongIds}
+          carriedPageSongIds={carriedPageSongIds}
           concert={concert}
           lockedSongs={lockedSongs}
           ownedBonusTotals={ownedBonusTotals}

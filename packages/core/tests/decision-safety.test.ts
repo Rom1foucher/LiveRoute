@@ -56,6 +56,7 @@ const analysis = (
   trials: 1,
   maxTrials: 1,
   converged: true,
+  uncertainAtBudgetLimit: false,
   recommendation: "safe",
   probabilityScope: "conditional-shop",
 });

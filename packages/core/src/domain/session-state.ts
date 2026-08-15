@@ -25,8 +25,8 @@ const uniqueValid = (
 /**
  * Restores only semantically valid relationships between persisted song sets.
  * Active bonuses must be owned. Visible offers remain the current page even
- * while a carry is active; carryover stores only the single song explicitly
- * selected for delayed buy.
+ * while a carry is active; carryover stores the complete exposed page. The
+ * field name remains v3-compatible while its PR-1 semantics become page-level.
  */
 export const sanitizePersistedSongState = ({
   validIds,
@@ -49,7 +49,7 @@ export const sanitizePersistedSongState = ({
   const carried = Array.isArray(carryoverSongIds)
     ? uniqueValid(carryoverSongIds, validIds)
         .filter((id) => !ownedSet.has(id))
-        .slice(0, 1)
+        .slice(0, 3)
     : null;
   const normalizedCarry = carried && carried.length > 0 ? carried : null;
   const visible = uniqueValid(visibleSongIds, validIds)

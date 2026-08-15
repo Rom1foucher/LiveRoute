@@ -210,10 +210,14 @@ export const deriveStrategicPlan = ({
     concertIndex === 1
       ? ["sp3-target", ...FRIENDSHIP_ROLES]
       : [...FRIENDSHIP_ROLES];
+  // Abandoning a hidden SP chase only suppresses new-page spending. If that
+  // target appears later, HOLD must still treat it as a visible opportunity.
   const holdVisibleRoles: SongRole[] =
-    concertIndex === 2
+    concertIndex === 1
       ? ["sp2-target", ...FRIENDSHIP_ROLES]
-      : [...FRIENDSHIP_ROLES];
+      : concertIndex === 2
+        ? ["sp2-target", "sp3-target", ...FRIENDSHIP_ROLES]
+        : [...FRIENDSHIP_ROLES];
 
   if (
     timingMode === "deadline-now" &&

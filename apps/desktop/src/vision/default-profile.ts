@@ -1,7 +1,7 @@
 // Generated from the canonical snapshot-only OCR profile.
 // Keep public/vision-profile.json structurally identical through the profile coherence test.
 export const RAW_DEFAULT_VISION_PROFILE = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   id: "global-steam-snapshot-2048-reference",
   name: "Global Steam — snapshots Lessons 2048×1152",
   windowTitlePattern: "umamusume|pretty derby",

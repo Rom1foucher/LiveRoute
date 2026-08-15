@@ -507,7 +507,8 @@ const buildDecision = (
       : ((policy?.reasons[0] && t(policy.reasons[0])) ??
         (techniqueResult?.terminalDecision &&
           t(techniqueResult.terminalDecision.reason)) ??
-        solver.recommendation?.detail ?? "");
+        solver.recommendation?.detail ??
+        "");
 
   return {
     bestTechniqueIndex: display.displayedTechniqueIndex,

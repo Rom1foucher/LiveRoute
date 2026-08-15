@@ -15,7 +15,8 @@ import {
   type StrategicPlan,
 } from "./planner/strategic-plan.ts";
 import { evaluatePageCoverage, type PageCoverage } from "./solver/song-dp.ts";
-import { riskThreshold } from "./solver/value.ts";
+import { riskCatastropheFloor, riskThreshold } from "./solver/value.ts";
+import { intervalCrosses, wilsonInterval } from "./monte-carlo.ts";
 
 export const TOKEN_KEYS = [
   "dance",
@@ -43,6 +44,29 @@ export type TrainingFacility =
   "speed" | "stamina" | "power" | "guts" | "wisdom";
 export type TrainingStat = TrainingFacility;
 export type RemainingTrainingsByFacility = Record<TrainingFacility, number>;
+
+/**
+ * Timing of a song effect relative to the Promotional Live that closes the
+ * current solver section. `concertIndex` follows the solver section index:
+ * 0..3 are the four Promotional Live sections and 4 is the Grand Live.
+ */
+export type ActivationMoment = {
+  concertIndex: number;
+  beforeLive: boolean;
+  remainingTrainingOpportunities: number;
+};
+
+export type AcquiredEffect = {
+  kind: "friendship" | "sp-training" | "practice" | "event";
+  magnitude: number;
+  activation: ActivationMoment;
+  /**
+   * Effect magnitude multiplied by the number of trainings that can still
+   * benefit after activation. This is deliberately separate from raw bonus
+   * acquisition telemetry.
+   */
+  effectiveTrainingExposure: number;
+};
 type Category = "status" | "dual" | "skillPt" | "hint" | "rest";
 
 export type Weighted<T> = {
@@ -67,6 +91,8 @@ export type AnalysisInput = {
   songs?: SongTarget[];
   /** Songs whose vectors should remain protected while choosing techniques. */
   reserveSongs?: SongTarget[];
+  /** PR-5 common downstream token vectors used by every technique comparator. */
+  resourceDemands?: readonly ResourceDemand[];
   objective?: AnalysisObjective;
   strategicPlan?: StrategicPlan;
   riskProfile?: RiskProfile;
@@ -115,6 +141,32 @@ export type TokenPressure = {
   priorityDemandCount: number;
   reserveReason: Message;
   level: "critical" | "tight" | "useful" | "free";
+};
+
+/**
+ * PR-5 common downstream resource contract. Every solver layer describes the
+ * token vectors it may actually consume using the same structure; pressure,
+ * reserve and technique spending then share one economic view instead of
+ * reconstructing demand from static song roles independently.
+ */
+export type ResourceDemandSource =
+  "required-song" | "reachable-policy-action" | "hunt" | "terminal";
+
+export type ResourceDemand = {
+  source: ResourceDemandSource;
+  songId?: string;
+  earliestUse: ActivationMoment;
+  /** Probability that this vector is materially reachable/usable downstream. */
+  probability: number;
+  cost: Balance;
+};
+
+export type TokenShadowPrice = {
+  key: TokenKey;
+  /** Normalized marginal scarcity premium consumed by technique comparators. */
+  shadowValue: number;
+  /** Probability/horizon-weighted downstream demand in raw token units. */
+  weightedDemand: number;
 };
 
 export type TechniqueSpendMetrics = {
@@ -185,16 +237,54 @@ export type TerminalTechniqueDecisionSummary = {
   applicable: true;
   action: "stop-now" | "expose-and-carry";
   reason: Message;
+  /** Actual MC samples used by the terminal evaluator. */
+  trials: number;
+  /** Requested upper bound before adaptive convergence. */
+  maxTrials: number;
+  /** True when confidence no longer crosses a material decision boundary. */
+  converged: boolean;
+  /** Sample or wall-clock budget ended while a material boundary stayed unresolved. */
+  uncertainAtBudgetLimit: boolean;
+  /** True when a caller-provided wall-clock guard stopped terminal MC early. */
+  timeBudgetExceeded?: boolean;
+  /** Shared common-random-number family used for sibling candidates. */
+  seedKey: string;
+  /** Canonical physical action key; candidate labels/positions are excluded. */
+  canonicalActionKey: string;
   reachProbability: number;
   expectedCommittedCost: number;
+  /** Shadow-price-weighted expected spend retained as resource telemetry. */
+  expectedWeightedCommittedCost: number;
+  /** C4-only loss of future Friendship / 18-song buying options. */
+  expectedOpportunityCost: number;
+  /** Preferred operating threshold of the active risk profile. */
+  riskThreshold: number;
+  /** Hard Wilson lower-bound floor below which C4 never pushes. */
+  catastropheFloor: number;
+  /** Wilson 95 % lower bound of terminal usable-outcome reach. */
+  reachConfidenceLowerBound: number;
+  /** C4 policy value before cost/risk penalties; zero outside C4. */
+  grossValue: number;
+  /** C4 risk penalty; zero outside C4. */
+  riskPenalty: number;
+  /** C4 net value after opportunity cost and risk; zero outside C4. */
+  netValue: number;
   stopCheckpointProbability: number;
   pushCheckpointProbability: number;
   stopTargetProbability: number;
   pushTargetProbability: number;
   stopFriendship10Probability: number;
   pushFriendship10Probability: number;
+  stopEffectiveFriendship10Probability: number;
+  pushEffectiveFriendship10Probability: number;
   stopExpectedFriendshipBonus: number;
   pushExpectedFriendshipBonus: number;
+  stopExpectedFriendshipTrainingExposure: number;
+  pushExpectedFriendshipTrainingExposure: number;
+  stopExpectedSpTrainingExposure: number;
+  pushExpectedSpTrainingExposure: number;
+  stopExpectedPracticeTrainingExposure: number;
+  pushExpectedPracticeTrainingExposure: number;
   stopExpectedStructuralPurchases: number;
   pushExpectedStructuralPurchases: number;
   decisionVector: readonly number[];
@@ -229,6 +319,7 @@ export type AnalysisResult = {
   /** Requested upper bound before adaptive convergence. */
   maxTrials: number;
   converged: boolean;
+  uncertainAtBudgetLimit: boolean;
   recommendation: "safe" | "push" | "risky" | "stop" | "invalid";
   planId?: StrategicPlan["id"];
   planLabel?: Message;
@@ -247,6 +338,7 @@ export type TechniqueTransitionInput = {
   nextSongCycle?: number;
   songs?: SongTarget[];
   reserveSongs?: SongTarget[];
+  resourceDemands?: readonly ResourceDemand[];
   objective?: AnalysisObjective;
   strategicPlan?: StrategicPlan;
   riskProfile?: RiskProfile;
@@ -503,7 +595,7 @@ export const FACILITY_STAT_WEIGHT: Partial<
 // (~45 early run, ~30 around C2, ~22 around C3, ~15 in C4). The tracker does
 // not collect per-turn clicks, so these remain estimates until exact run-state
 // training counts are available.
-const TRAINING_HORIZON_BY_CONCERT: readonly [
+export const TRAINING_HORIZON_BY_CONCERT: readonly [
   number,
   number,
   number,
@@ -539,6 +631,169 @@ export const estimateRemainingTrainingsByFacility = (
     ]),
   ) as RemainingTrainingsByFacility;
 };
+
+export const totalRemainingTrainings = (
+  remainingTrainingsByFacility: RemainingTrainingsByFacility,
+): number =>
+  TRAINING_FACILITIES.reduce(
+    (sum, facility) => sum + remainingTrainingsByFacility[facility],
+    0,
+  );
+
+/**
+ * Profile-independent section horizon used when an exact click distribution is
+ * unavailable. Unlike stat-specific practice value, Friendship and Skill Pt
+ * Training affect every facility, so only the total number of remaining
+ * trainings is required.
+ */
+export const estimateRemainingTrainingOpportunities = (
+  concertIndex: number,
+): number =>
+  TRAINING_HORIZON_BY_CONCERT[
+    Math.max(0, Math.min(4, Math.trunc(concertIndex)))
+  ];
+
+export const activationMoment = ({
+  concertIndex,
+  beforeLive,
+  remainingTrainingsByFacility,
+}: {
+  concertIndex: number;
+  beforeLive: boolean;
+  remainingTrainingsByFacility?: RemainingTrainingsByFacility | null;
+}): ActivationMoment => {
+  // The section horizon is indexed by the Live whose shop/section is being
+  // solved. At section resolution, both an immediate Training effect and a
+  // Concert Bonus activated by that Live affect the remaining run horizon for
+  // the same index. The distinction matters when carrying into a later section:
+  // C4 (index 3) still has ~15 trainings of exposure, Grand Live (index 4) has 0.
+  return {
+    concertIndex,
+    beforeLive,
+    remainingTrainingOpportunities:
+      beforeLive && remainingTrainingsByFacility
+        ? totalRemainingTrainings(remainingTrainingsByFacility)
+        : estimateRemainingTrainingOpportunities(concertIndex),
+  };
+};
+
+const parseTrainingMagnitude = (practiceBonus: string): number => {
+  const match = practiceBonus.match(/\+(\d+)/);
+  return match ? Math.max(0, Number.parseInt(match[1] ?? "0", 10)) : 0;
+};
+
+/**
+ * Converts a purchased song into explicitly-timed effects. Practice/SP effects
+ * activate immediately and therefore use the current remaining-training
+ * horizon. Friendship is a Concert Bonus and activates at the outgoing Live;
+ * it therefore uses that section's post-Live horizon. C4 still has training
+ * exposure, while a Friendship bought at Grand Live has none.
+ */
+export const acquiredEffectsForSong = ({
+  song,
+  concertIndex,
+  remainingTrainingsByFacility,
+  friendshipSongMultiplier = 1,
+}: {
+  song: SongTarget;
+  concertIndex: number;
+  remainingTrainingsByFacility?: RemainingTrainingsByFacility | null;
+  friendshipSongMultiplier?: number;
+}): AcquiredEffect[] => {
+  const effects: AcquiredEffect[] = [];
+  const roles = song.roles ?? [];
+  const practiceMoment = activationMoment({
+    concertIndex,
+    beforeLive: true,
+    remainingTrainingsByFacility,
+  });
+
+  if (roles.includes("sp3-target") || roles.includes("sp2-target")) {
+    const magnitude = roles.includes("sp3-target") ? 3 : 2;
+    effects.push({
+      kind: "sp-training",
+      magnitude,
+      activation: practiceMoment,
+      effectiveTrainingExposure:
+        magnitude *
+        Math.max(1, friendshipSongMultiplier) *
+        practiceMoment.remainingTrainingOpportunities,
+    });
+  } else if (song.practiceBonus) {
+    const dynamicPractice =
+      /^(speed|stamina|power|guts|wisdom) training \+\d+/i.test(
+        song.practiceBonus,
+      ) || /^skill pts? training \+\d+/i.test(song.practiceBonus);
+    if (dynamicPractice) {
+      const magnitude = parseTrainingMagnitude(song.practiceBonus);
+      const value = remainingTrainingsByFacility
+        ? structuralTrainingValue(
+            song.practiceBonus,
+            remainingTrainingsByFacility,
+            friendshipSongMultiplier,
+          )
+        : /^skill pts? training \+\d+/i.test(song.practiceBonus)
+          ? magnitude *
+            Math.max(1, friendshipSongMultiplier) *
+            practiceMoment.remainingTrainingOpportunities
+          : 0;
+      effects.push({
+        kind: "practice",
+        magnitude,
+        activation: practiceMoment,
+        effectiveTrainingExposure: value,
+      });
+    }
+  }
+
+  const friendshipMagnitude = roles.includes("friendship-10")
+    ? 10
+    : roles.includes("friendship-5")
+      ? 5
+      : 0;
+  if (friendshipMagnitude > 0) {
+    const moment = activationMoment({
+      concertIndex,
+      beforeLive: false,
+    });
+    effects.push({
+      kind: "friendship",
+      magnitude: friendshipMagnitude,
+      activation: moment,
+      effectiveTrainingExposure:
+        friendshipMagnitude * moment.remainingTrainingOpportunities,
+    });
+  }
+
+  return effects;
+};
+
+export const acquiredFriendshipEffect = ({
+  magnitude,
+  concertIndex,
+}: {
+  magnitude: number;
+  concertIndex: number;
+}): AcquiredEffect | null => {
+  const boundedMagnitude = Math.max(0, magnitude);
+  if (boundedMagnitude <= 0) return null;
+  const moment = activationMoment({ concertIndex, beforeLive: false });
+  return {
+    kind: "friendship",
+    magnitude: boundedMagnitude,
+    activation: moment,
+    effectiveTrainingExposure:
+      boundedMagnitude * moment.remainingTrainingOpportunities,
+  };
+};
+
+export const effectExposure = (
+  effects: readonly AcquiredEffect[],
+  kind: AcquiredEffect["kind"],
+): number =>
+  effects
+    .filter((effect) => effect.kind === kind)
+    .reduce((sum, effect) => sum + effect.effectiveTrainingExposure, 0);
 
 /**
  * Exact structural value from the verified formula:
@@ -983,6 +1238,27 @@ const songSetSignature = (songs: SongTarget[]): string =>
     .sort()
     .join("|");
 
+const resourceDemandSignature = (
+  demands: readonly ResourceDemand[] = [],
+): string =>
+  [...demands]
+    .sort(
+      (left, right) =>
+        (left.songId ?? "").localeCompare(right.songId ?? "") ||
+        left.source.localeCompare(right.source),
+    )
+    .map((demand) =>
+      [
+        demand.source,
+        demand.songId ?? "",
+        demand.probability.toFixed(6),
+        demand.earliestUse.concertIndex,
+        demand.earliestUse.remainingTrainingOpportunities.toFixed(3),
+        ...TOKEN_KEYS.map((key) => demand.cost[key]),
+      ].join(","),
+    )
+    .join("|");
+
 const reserveFeasibilitySignature = (
   context: ReserveFeasibilityContext | undefined,
 ): string => {
@@ -1011,6 +1287,7 @@ const memoizedTokenPressure = (
   generationProfile: GenerationProfile,
   strategicPlan?: StrategicPlan,
   reserveFeasibility?: ReserveFeasibilityContext,
+  resourceDemands: readonly ResourceDemand[] = [],
 ): TokenPressure[] => {
   if (!memo)
     return calculateTokenPressure(
@@ -1019,8 +1296,9 @@ const memoizedTokenPressure = (
       generationProfile,
       strategicPlan,
       reserveFeasibility,
+      resourceDemands,
     );
-  const key = `${generationProfile}:${strategicPlan?.id ?? "none"}:${songSetSignature(songs)}:${balanceSignature(balance)}:${reserveFeasibilitySignature(reserveFeasibility)}`;
+  const key = `${generationProfile}:${strategicPlan?.id ?? "none"}:${songSetSignature(songs)}:${balanceSignature(balance)}:${reserveFeasibilitySignature(reserveFeasibility)}:${resourceDemandSignature(resourceDemands)}`;
   const cached = memo.pressure.get(key);
   if (cached) {
     memo.stats.pressureHits += 1;
@@ -1033,6 +1311,7 @@ const memoizedTokenPressure = (
     generationProfile,
     strategicPlan,
     reserveFeasibility,
+    resourceDemands,
   );
   memo.pressure.set(key, computed);
   return computed;
@@ -1089,6 +1368,7 @@ export const chooseSafestTechnique = (
   profile: RiskProfile = "standard",
   memo?: TechniqueSimulationMemo,
   reserveFeasibility?: ReserveFeasibilityContext,
+  resourceDemands: readonly ResourceDemand[] = [],
 ): Balance | null => {
   const affordable = offers.filter((offer) => canAfford(balance, offer));
   if (affordable.length === 0) return null;
@@ -1099,6 +1379,7 @@ export const chooseSafestTechnique = (
     generationProfile,
     strategicPlan,
     reserveFeasibility,
+    resourceDemands,
   );
   return affordable
     .map((cost) => {
@@ -1314,6 +1595,7 @@ const simulateUnknownTechniqueSequence = ({
   techniquesRemaining,
   songs,
   reserveSongs,
+  resourceDemands,
   objective,
   strategicPlan,
   riskProfile,
@@ -1332,6 +1614,7 @@ const simulateUnknownTechniqueSequence = ({
   techniquesRemaining: number;
   songs: SongTarget[];
   reserveSongs: SongTarget[];
+  resourceDemands: readonly ResourceDemand[];
   objective: AnalysisObjective;
   strategicPlan?: StrategicPlan;
   riskProfile: RiskProfile;
@@ -1347,7 +1630,7 @@ const simulateUnknownTechniqueSequence = ({
   let balance = { ...startingBalance };
   let purchases = initialPurchases;
   let spent = initialSpent;
-  const protectedReserveSongs = strategicPlan
+  const pressureSongs = strategicPlan
     ? reserveSongs.filter((song) => isReserveTarget(song, strategicPlan))
     : reserveSongs;
 
@@ -1368,7 +1651,7 @@ const simulateUnknownTechniqueSequence = ({
       step === techniquesRemaining - 1,
       objective,
       songs,
-      protectedReserveSongs,
+      pressureSongs,
       generationProfile,
       strategicPlan,
       riskProfile,
@@ -1381,9 +1664,10 @@ const simulateUnknownTechniqueSequence = ({
             nextSongCycle,
             techniquesToNextSong: techniquesRemaining - step,
             currentTechniqueOffers: offers,
-            reserveSongIds: protectedReserveSongs.map((song) => song.id),
+            reserveSongIds: pressureSongs.map((song) => song.id),
           }
         : undefined,
+      resourceDemands,
     );
     if (!chosen) {
       return {
@@ -1422,6 +1706,7 @@ export const simulateTechniqueTransition = ({
   nextSongCycle = 1,
   songs = [],
   reserveSongs = songs,
+  resourceDemands = [],
   objective = "carryover",
   strategicPlan,
   riskProfile = "standard",
@@ -1437,6 +1722,7 @@ export const simulateTechniqueTransition = ({
     techniquesRemaining: Math.max(0, Math.trunc(techniquesRemaining)),
     songs,
     reserveSongs,
+    resourceDemands,
     objective,
     strategicPlan,
     riskProfile,
@@ -1446,33 +1732,6 @@ export const simulateTechniqueTransition = ({
     trialIndex,
     memo,
   });
-
-const wilsonInterval = (
-  successes: number,
-  samples: number,
-  z = 1.96,
-): readonly [number, number] => {
-  if (samples <= 0) return [0, 1];
-  const probability = Math.min(1, Math.max(0, successes / samples));
-  const z2 = z * z;
-  const denominator = 1 + z2 / samples;
-  const centre = probability + z2 / (2 * samples);
-  const margin =
-    z *
-    Math.sqrt((probability * (1 - probability) + z2 / (4 * samples)) / samples);
-  return [
-    Math.max(0, (centre - margin) / denominator),
-    Math.min(1, (centre + margin) / denominator),
-  ];
-};
-
-const intervalCrosses = (
-  interval: readonly [number, number],
-  thresholds: readonly number[],
-): boolean =>
-  thresholds.some(
-    (threshold) => interval[0] < threshold && interval[1] >= threshold,
-  );
 
 const shouldStopAdaptiveAnalysis = ({
   samples,
@@ -1493,7 +1752,7 @@ const shouldStopAdaptiveAnalysis = ({
   const reachInterval = wilsonInterval(reachSuccesses, samples);
   const goalInterval = wilsonInterval(goalSuccesses, samples);
   const threshold = riskThreshold(riskProfile);
-  const riskyFloor = Math.max(0.65, threshold - 0.2);
+  const riskyFloor = riskCatastropheFloor(riskProfile);
   const reachStable = !intervalCrosses(reachInterval, [
     riskyFloor,
     threshold,
@@ -1516,6 +1775,7 @@ export const runAnalysis = ({
   nextSongCycle = 1,
   songs = [],
   reserveSongs = songs,
+  resourceDemands = [],
   objective = "carryover",
   strategicPlan,
   riskProfile = "standard",
@@ -1580,6 +1840,7 @@ export const runAnalysis = ({
       trials,
       maxTrials: trials,
       converged: true,
+      uncertainAtBudgetLimit: false,
       recommendation: "invalid",
       planId: strategicPlan?.id,
       planLabel: strategicPlan && planLabelMessage(strategicPlan),
@@ -1639,6 +1900,7 @@ export const runAnalysis = ({
       techniquesRemaining: remainingAfterCandidate,
       songs,
       reserveSongs,
+      resourceDemands,
       objective,
       strategicPlan,
       riskProfile,
@@ -1799,6 +2061,17 @@ export const runAnalysis = ({
             ? "risky"
             : "stop";
 
+  const finalEstimateStable = shouldStopAdaptiveAnalysis({
+    samples: denominator,
+    minimumSamples,
+    reachSuccesses: successes,
+    goalSuccesses: goalSuccessesForConvergence,
+    objective,
+    riskProfile,
+  });
+  const uncertainAtBudgetLimit =
+    denominator >= maxTrials && !finalEstimateStable;
+
   const appearanceProbability =
     songs.length === 0 ? 0 : Math.min(3, songs.length) / songs.length;
   const songOutcomes = songs
@@ -1847,7 +2120,8 @@ export const runAnalysis = ({
     criticalTokenGain,
     trials: denominator,
     maxTrials,
-    converged: denominator < maxTrials,
+    converged: finalEstimateStable,
+    uncertainAtBudgetLimit,
     recommendation,
     planId: strategicPlan?.id,
     planLabel: strategicPlan && planLabelMessage(strategicPlan),
@@ -1967,6 +2241,81 @@ const GENERATION_SUPPLY: Record<GenerationProfile, Balance> = {
     visual: 1,
     mental: 1,
   },
+};
+
+export const RESOURCE_DEMAND_SOURCE_WEIGHT: Record<
+  ResourceDemandSource,
+  number
+> = {
+  "required-song": 1.2,
+  "reachable-policy-action": 1,
+  hunt: 1.15,
+  terminal: 1.2,
+};
+
+// PR-5 introduces downstream demand as an opportunity-cost correction, not a
+// replacement for the already calibrated structural reserve pressure. Keeping
+// the first calibration deliberately sub-dominant avoids turning an OR-set of
+// future policy actions into an implicit hard reserve.
+export const RESOURCE_DEMAND_SHADOW_SCALE = 0.25;
+
+/**
+ * Shared PR-5 shadow prices. `earliestUse` deliberately participates in the
+ * value: a vector needed while many trainings remain has more option value
+ * than the same speculative vector at the end of the run, while terminal and
+ * hard-required conversions retain a non-zero base weight even at horizon 0.
+ */
+export const calculateShadowPrices = (
+  tokens: Balance,
+  demands: readonly ResourceDemand[],
+  generationProfile: GenerationProfile = "speed-wit",
+): TokenShadowPrice[] => {
+  const supply = GENERATION_SUPPLY[generationProfile];
+  const weightedByKey = Object.fromEntries(
+    TOKEN_KEYS.map((key) => [
+      key,
+      demands.reduce((sum, demand) => {
+        const probability = clamp01(demand.probability);
+        if (probability <= 0 || demand.cost[key] <= 0) return sum;
+        const horizon = Math.max(
+          0,
+          demand.earliestUse.remainingTrainingOpportunities,
+        );
+        const horizonWeight = 1 + Math.min(1, horizon / 45);
+        return (
+          sum +
+          demand.cost[key] *
+            probability *
+            horizonWeight *
+            RESOURCE_DEMAND_SOURCE_WEIGHT[demand.source]
+        );
+      }, 0),
+    ]),
+  ) as Record<TokenKey, number>;
+  const normalizedDemand = Object.fromEntries(
+    TOKEN_KEYS.map((key) => [
+      key,
+      weightedByKey[key] / Math.max(0.4, supply[key]),
+    ]),
+  ) as Record<TokenKey, number>;
+  const total = TOKEN_KEYS.reduce((sum, key) => sum + normalizedDemand[key], 0);
+
+  return TOKEN_KEYS.map((key) => {
+    const demandShare = total <= 0 ? 0 : normalizedDemand[key] / total;
+    // Low current stock increases the marginal value of a demanded colour,
+    // but cannot create pressure for a colour with no downstream demand.
+    const stockScarcity =
+      normalizedDemand[key] <= 0
+        ? 0
+        : normalizedDemand[key] / Math.max(10, tokens[key] + 10);
+    return {
+      key,
+      weightedDemand: weightedByKey[key],
+      shadowValue:
+        RESOURCE_DEMAND_SHADOW_SCALE *
+        Math.max(0, demandShare + Math.min(0.45, stockScarcity)),
+    };
+  });
 };
 
 const songPolicyValue = (song: SongTarget): number =>
@@ -2349,6 +2698,7 @@ export const calculateTokenPressure = (
   generationProfile: GenerationProfile = "speed-wit",
   strategicPlan?: StrategicPlan,
   reserveFeasibility?: ReserveFeasibilityContext,
+  resourceDemands: readonly ResourceDemand[] = [],
 ): TokenPressure[] => {
   const valueOf = (song: SongTarget): number => {
     const base = strategicPlan
@@ -2358,10 +2708,13 @@ export const calculateTokenPressure = (
     // still uses calculateTokenReservePlan and therefore the ordinal tier.
     return base + Math.max(0, song.practiceValue ?? 0);
   };
+  const demandedSongIds = new Set(
+    resourceDemands.map((demand) => demand.songId).filter(Boolean),
+  );
   const relevant = songs
-    .filter((song) => valueOf(song) > 0)
+    .filter((song) => valueOf(song) > 0 || demandedSongIds.has(song.id))
     .sort((a, b) => valueOf(b) - valueOf(a));
-  if (relevant.length === 0) {
+  if (relevant.length === 0 && resourceDemands.length === 0) {
     return TOKEN_KEYS.map((key) => ({
       key,
       shadowValue: 0,
@@ -2386,6 +2739,11 @@ export const calculateTokenPressure = (
     0,
   );
 
+  const sharedShadowByKey = Object.fromEntries(
+    calculateShadowPrices(tokens, resourceDemands, generationProfile).map(
+      (price) => [price.key, price.shadowValue],
+    ),
+  ) as Record<TokenKey, number>;
   const shadowByKey = Object.fromEntries(
     TOKEN_KEYS.map((key) => {
       const reduced = {
@@ -2400,7 +2758,14 @@ export const calculateTokenPressure = (
           0,
         ) / Math.max(0.4, supply[key]);
       const demandShare = totalDemand === 0 ? 0 : weightedDemand / totalDemand;
-      return [key, Math.max(0, marginalDrop * 4 + demandShare)];
+      return [
+        key,
+        Math.max(
+          0,
+          marginalDrop * 4 + demandShare,
+          sharedShadowByKey[key] ?? 0,
+        ),
+      ];
     }),
   ) as Record<TokenKey, number>;
 

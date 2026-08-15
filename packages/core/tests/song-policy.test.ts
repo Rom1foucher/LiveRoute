@@ -10,9 +10,10 @@ import type { SongRole } from "../src/domain/song-catalog.ts";
 import { SONGS } from "../src/domain/song-data.ts";
 import { buildSolverStateContext } from "../src/solver/context.ts";
 import { analyzeSongSelection } from "../src/solver/song-policy.ts";
+import { createHuntState } from "../src/solver/hunt-state.ts";
 import { compareDecisionVectors } from "../src/solver/value.ts";
 import { assessSongChoices } from "../src/diagnostics/decision-safety.ts";
-import { fr, frAll, hasCode } from "./helpers/messages.ts";
+import { frAll, hasCode } from "./helpers/messages.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
   dance: 0,
@@ -488,15 +489,19 @@ test("C4 à 10 songs conserve 16/18 comme diagnostics sans porte dure", () => {
     trials: 300,
   });
 
-  const stop = result.policies.find(
-    (policy) => policy.action === "stop-and-carry-stock",
+  const carry = result.policies.find(
+    (policy) => policy.action === "carry-page",
   );
-  assert.ok(stop);
-  assert.equal(stop.checkpoint16Status, "closable-before-deadline");
-  assert.equal(stop.valid, true);
+  assert.ok(carry);
+  assert.equal(carry.checkpoint16Status, "closable-before-deadline");
+  assert.equal(carry.valid, true);
   assert.doesNotMatch(
-    frAll(stop.reasons),
+    frAll(carry.reasons),
     /checkpoint 16 impossible|porte 16/i,
+  );
+  assert.equal(
+    result.policies.some((policy) => policy.action === "stop-and-carry-stock"),
+    false,
   );
 
   assert.ok(
@@ -617,7 +622,7 @@ test("la politique terminale consomme la vraie valeur inter-section", () => {
     (policy) => policy.id === "current-filler:buy-stop",
   );
   const carry = result.policies.find(
-    (policy) => policy.id === "current-filler:carry-page",
+    (policy) => policy.action === "carry-page",
   );
   assert.ok(buyStop?.nextSectionReadiness);
   assert.ok(carry?.nextSectionReadiness);
@@ -627,10 +632,15 @@ test("la politique terminale consomme la vraie valeur inter-section", () => {
   );
   assert.equal(buyStop.nextSectionReadiness.transitionTokenGain, 10);
   assert.ok(buyStop.nextSectionReadiness.expectedFriendshipBonus > 0);
+  // Carrying the page itself commits no purchase before the Live. After the
+  // verified +10, the next-section policy may legitimately buy the carried
+  // filler to continue toward the known Friendship pool.
+  assert.equal(carry.decisionVector.committedCost, 0);
   assert.ok(carry.nextSectionReadiness.expectedFriendshipBonus > 0);
+  assert.ok(carry.nextSectionReadiness.expectedPurchases > 0);
 });
 
-test("C2 peut refuser un filler et porter le stock jusqu'aux Friendship de C4", () => {
+test("C2 peut refuser un filler et porter la page jusqu'aux Friendship de C4", () => {
   const filler = {
     ...song("bluebird", { dance: 21, visual: 42 }, ["specialty-priority"]),
     practiceValue: 2,
@@ -672,8 +682,9 @@ test("C2 peut refuser un filler et porter le stock jusqu'aux Friendship de C4", 
     trials: 600,
   });
 
-  assert.equal(result.recommended?.action, "stop-and-carry-stock");
+  assert.equal(result.recommended?.action, "carry-page");
   assert.equal(result.recommended?.songId, null);
+  assert.deepEqual(result.recommended?.carriedSongIds, ["bluebird"]);
   assert.equal(result.recommended?.nextSectionReadiness?.horizonSections, 2);
   assert.match(frAll(result.recommended?.reasons ?? []), /C4/);
 });
@@ -1061,6 +1072,11 @@ test("le replay C3 cycle 4 du log abandonne HUNT sans acheter Komorebi", () => {
     timingMode: "section-open",
     maxSongPages: 4,
     continuationObjective: "priority-song",
+    huntState: {
+      ...createHuntState(["grow-up-shine"]),
+      pagesSeenWithoutTarget: 3,
+      lastObservedPageKey: "2:4",
+    },
     trials: 300,
   });
 
@@ -1069,14 +1085,48 @@ test("le replay C3 cycle 4 du log abandonne HUNT sans acheter Komorebi", () => {
   assert.equal(result.recommended?.abandonsHunt, true);
   assert.equal(
     result.recommended?.huntAbandonReason?.code,
-    "reason.huntAbandonTechniqueCount",
+    "reason.huntAbandonMarginalValue",
   );
-  assert.match(fr(result.recommended?.huntAbandonReason), /5 techniques/);
+  assert.equal(result.recommended?.huntDecision?.action, "abandon-to-hold");
   assert.equal(
     result.policies.find((policy) => policy.id === "komorebi:buy-continue")
       ?.valid,
     false,
   );
+});
+
+test("PR-6 : après trois misses, une cible SP rentable et un cycle court peuvent encore poursuivre HUNT", () => {
+  const filler = song("filler-profitable-hunt", { dance: 5 }, ["filler"]);
+  const sp3 = {
+    ...song("SP3-profitable-hunt", { vocal: 21 }, ["sp3-target"]),
+    practiceBonus: "Skill Pt training +3",
+  };
+  const result = analyzeSongSelection({
+    period: "classic",
+    tokens: rich,
+    visibleSongs: [filler],
+    remainingSongs: [filler, sp3],
+    techniquesToNextSong: 1,
+    songsThisSection: 2,
+    totalSongs: 9,
+    concertIndex: 2,
+    timingMode: "section-open",
+    nextSongCycle: 3,
+    huntState: {
+      ...createHuntState(["SP3-profitable-hunt"]),
+      pagesSeenWithoutTarget: 3,
+      lastObservedPageKey: "2:3",
+    },
+    trials: 400,
+  });
+
+  const continuation = result.policies.find(
+    (policy) => policy.id === "filler-profitable-hunt:buy-continue",
+  );
+  assert.equal(result.plan.mode, "hunt");
+  assert.equal(continuation?.huntDecision?.action, "continue-hunt");
+  assert.equal(continuation?.huntAbandonReason, undefined);
+  assert.equal(continuation?.valid, true);
 });
 
 test("HUNT abandonne avant un cycle à cinq techniques et persiste en HOLD", () => {
@@ -1095,6 +1145,11 @@ test("HUNT abandonne avant un cycle à cinq techniques et persiste en HOLD", () 
     concertIndex: 2,
     timingMode: "section-open",
     nextSongCycle: 4,
+    huntState: {
+      ...createHuntState(["SP3-abandon"]),
+      pagesSeenWithoutTarget: 3,
+      lastObservedPageKey: "2:4",
+    },
     trials: 300,
   });
   assert.equal(result.plan.mode, "hunt");
@@ -1108,7 +1163,8 @@ test("HUNT abandonne avant un cycle à cinq techniques et persiste en HOLD", () 
   );
   assert.equal(continuation?.valid, false);
   assert.equal(continuation?.overrideEligible, false);
-  assert.match(frAll(continuation?.reasons ?? []), /5 techniques/);
+  assert.equal(continuation?.huntDecision?.action, "abandon-to-hold");
+  assert.match(frAll(continuation?.reasons ?? []), /valeur marginale/);
   assert.equal(stop?.abandonsHunt, true);
   assert.equal(stop?.postPurchasePlanId, "hold");
 });
@@ -1137,12 +1193,21 @@ test("HUNT applique le seuil probabiliste avant un cycle profond", () => {
     concertIndex: 2,
     timingMode: "section-open",
     nextSongCycle: 3,
+    huntState: {
+      ...createHuntState(["SP3-low-probability"]),
+      pagesSeenWithoutTarget: 3,
+      lastObservedPageKey: "2:3",
+    },
     trials: 300,
   });
 
   assert.equal(result.recommended?.action, "wait-reserve");
   assert.equal(result.recommended?.abandonsHunt, true);
-  assert.match(fr(result.recommended?.huntAbandonReason), /sous le seuil 25 %/);
+  assert.equal(
+    result.recommended?.huntAbandonReason?.code,
+    "reason.huntAbandonMarginalValue",
+  );
+  assert.equal(result.recommended?.huntDecision?.action, "abandon-to-hold");
 });
 
 test("Grand Live : Great Success incomplet force encore la conversion, indépendamment de 18", () => {
@@ -1496,15 +1561,12 @@ test("replay pré-patch s5 : la chaîne C1 conserve toute sa valeur d'horizon", 
   const continuation = result.policies.find(
     (policy) => policy.id === "tachiichi:buy-continue",
   );
-  const stop = result.policies.find(
-    (policy) => policy.id === "stop-and-carry-stock",
-  );
+  const stop = result.policies.find((policy) => policy.action === "carry-page");
   assert.ok(continuation && stop);
   assert.equal(result.recommended?.action, "buy-continue");
-  assert.ok(
-    (continuation.nextSectionReadiness?.expectedPurchases ?? 0) >
-      (stop.nextSectionReadiness?.expectedPurchases ?? 0),
-  );
+  // A carried full page may buy after the Live and therefore execute more
+  // total purchases than the old preselected-song carry model. What matters
+  // here is that the explicit C1 continuation still wins on horizon value.
   assert.ok(
     (continuation.nextSectionReadiness?.expectedFriendshipBonus ?? 0) >
       (stop.nextSectionReadiness?.expectedFriendshipBonus ?? 0),
@@ -1998,4 +2060,265 @@ test("P4 : le classement filler de fin C4 est invariant entre 10/18 et 17/18", (
         guts.decisionVector.continuation[0],
     );
   }
+});
+
+test("PR-1 : un rollout risky sous le seuil n'interdit plus BUY_STOP", () => {
+  const fanfare = song("fanfare-risk", { dance: 26, visual: 42 }, [
+    "friendship-10",
+  ]);
+  const fillerA = song("a", { passion: 21 }, ["filler"]);
+  const fillerB = song("b", { vocal: 21 }, ["filler"]);
+  const hidden = song("hidden", { mental: 42 }, ["friendship-5"]);
+  const result = analyzeSongSelection({
+    period: "senior",
+    tokens: balance({
+      dance: 60,
+      passion: 30,
+      vocal: 30,
+      visual: 45,
+      mental: 40,
+    }),
+    visibleSongs: [fanfare, fillerA, fillerB],
+    remainingSongs: [fanfare, fillerA, fillerB, hidden],
+    techniquesToNextSong: 4,
+    songsThisSection: 3,
+    totalSongs: 13,
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    nextSongCycle: 4,
+    maxSongPages: 4,
+    trials: 120,
+  });
+
+  const buyStop = result.policies.find((policy) => policy.id === "a:buy-stop");
+  const buyContinue = result.policies.find(
+    (policy) => policy.id === "a:buy-continue",
+  );
+  assert.ok(buyStop && buyContinue);
+  assert.equal(buyStop.continuationRecommendation, "risky");
+  assert.equal(buyStop.valid, true);
+  assert.equal(buyContinue.valid, false);
+  assert.ok(buyContinue.nextSongProbability < 0.92);
+});
+
+test("PR-1 audit 85/33/43/51/6 : Fanfare BUY_STOP ferme la zone morte", () => {
+  const remainingIds = [
+    "tachiichi",
+    "nigekiri",
+    "a-no-ne",
+    "bluebird",
+    "komorebi",
+    "pyoitto",
+    "present-march",
+    "sekai",
+    "fanfare",
+  ];
+  const remainingSongs = remainingIds.map(catalogTarget);
+  const visibleSongs = ["a-no-ne", "nigekiri", "fanfare"].map((id) =>
+    remainingSongs.find((candidate) => candidate.id === id)!,
+  );
+
+  const result = analyzeSongSelection({
+    period: "senior",
+    tokens: balance({
+      dance: 85,
+      passion: 33,
+      vocal: 43,
+      visual: 51,
+      mental: 6,
+    }),
+    visibleSongs,
+    remainingSongs,
+    techniquesToNextSong: 2,
+    songsThisSection: 2,
+    totalSongs: 10,
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    nextSongCycle: 4,
+    maxSongPages: 4,
+    trials: 180,
+  });
+
+  const buyStop = result.policies.find(
+    (policy) => policy.id === "fanfare:buy-stop",
+  );
+  const buyContinue = result.policies.find(
+    (policy) => policy.id === "fanfare:buy-continue",
+  );
+  assert.ok(buyStop && buyContinue);
+  assert.equal(buyStop.affordable, true);
+  assert.equal(buyStop.valid, true);
+  assert.equal(buyContinue.continuationRecommendation, "risky");
+  assert.equal(buyContinue.valid, false);
+  assert.ok(buyContinue.nextSongProbability < 0.92);
+  assert.equal(result.recommended?.id, "fanfare:buy-stop");
+  assert.equal(
+    result.policies.some((policy) => policy.action === "stop-and-carry-stock"),
+    false,
+  );
+});
+
+test("PR-7 : un micro-écart probabiliste cède au critère structurel suivant", () => {
+  const noisyHigh = {
+    hard: 1,
+    riskAdmissible: 1,
+    prospective: [0.996],
+    structural: 1,
+    continuation: [0.99],
+    retainedTokens: 100,
+    committedCost: 20,
+    tieId: "noisy-high",
+  };
+  const structurallyBetter = {
+    hard: 1,
+    riskAdmissible: 1,
+    prospective: [0.99],
+    structural: 2,
+    continuation: [0.99],
+    retainedTokens: 100,
+    committedCost: 20,
+    tieId: "structural",
+  };
+
+  assert.ok(compareDecisionVectors(structurallyBetter, noisyHigh) > 0);
+});
+
+test("hotfix v6 replay C2 : Speed +1 passe devant Guts +1 à coût identique", () => {
+  const tokens = balance({
+    dance: 147,
+    passion: 22,
+    vocal: 45,
+    visual: 49,
+    mental: 35,
+  });
+  const context = buildSolverStateContext({
+    catalog: SONGS,
+    concertIndex: 1,
+    period: "classic",
+    techniqueOfferPeriod: null,
+    songCycle: 2,
+    techniquesToNextSong: 0,
+    tokens,
+    ownedSongIds: [
+      "kiseki",
+      "ring-ring",
+      "run-run",
+      "seishun",
+      "yume-wo-kakeru",
+    ],
+    activeSongIds: ["kiseki", "ring-ring", "run-run", "seishun"],
+    selectedOfferIds: ["nigekiri", "bluebird", "tachiichi"],
+    solverMode: "expert",
+    riskProfile: "standard",
+    generationProfile: "speed-wit",
+    analysisObjective: "priority-song",
+    songsThisSection: 1,
+    totalSongs: 6,
+    timingMode: "deadline-now",
+  });
+  const result = analyzeSongSelection({
+    period: "classic",
+    firstOfferPeriod: context.firstOfferPeriod,
+    tokens,
+    visibleSongs: context.visibleSongs,
+    remainingSongs: context.currentSongs,
+    futureSongs: context.futureSongs,
+    techniquesToNextSong: 2,
+    songsThisSection: 1,
+    totalSongs: 6,
+    concertIndex: 1,
+    generationProfile: context.effectiveGenerationProfile,
+    friendshipSongMultiplier: context.friendshipSongMultiplier,
+    remainingTrainingsByFacility: context.remainingTrainings ?? undefined,
+    riskProfile: context.effectiveRiskProfile,
+    trials: 224,
+    nextSongCycle: 2,
+    timingMode: "deadline-now",
+    continuationObjective: "priority-song",
+  });
+  const tachiichiIndex = result.policies.findIndex(
+    (policy) => policy.id === "tachiichi:buy-continue",
+  );
+  const nigekiriIndex = result.policies.findIndex(
+    (policy) => policy.id === "nigekiri:buy-continue",
+  );
+  assert.ok(tachiichiIndex >= 0 && nigekiriIndex >= 0);
+  assert.ok(tachiichiIndex < nigekiriIndex);
+});
+
+test("hotfix v6 replay C2 : Friendship +5 visible passe devant Go This Way", () => {
+  const remainingIds = [
+    "nigekiri",
+    "go-this-way",
+    "zensoku",
+    "a-no-ne",
+    "bluebird",
+  ];
+  const remainingSongs = remainingIds.map(catalogTarget);
+  const visibleSongs = ["zensoku", "go-this-way", "bluebird"].map((id) =>
+    remainingSongs.find((candidate) => candidate.id === id)!,
+  );
+  const result = analyzeSongSelection({
+    period: "classic",
+    tokens: balance({
+      dance: 126,
+      passion: 16,
+      vocal: 29,
+      visual: 28,
+      mental: 25,
+    }),
+    visibleSongs,
+    remainingSongs,
+    techniquesToNextSong: 2,
+    songsThisSection: 2,
+    totalSongs: 7,
+    concertIndex: 1,
+    generationProfile: "speed-wit",
+    riskProfile: "standard",
+    nextSongCycle: 3,
+    timingMode: "deadline-now",
+    trials: 224,
+  });
+  assert.equal(result.recommended?.songId, "zensoku");
+});
+
+test("hotfix v6 replay C4 : Grow Up and Shine passe devant Nigekiri", () => {
+  const remainingIds = [
+    "nigekiri",
+    "go-this-way",
+    "bluebird",
+    "grow-up-shine",
+    "komorebi",
+    "pyoitto",
+    "yumezora",
+    "present-march",
+    "sekai",
+    "harusora",
+  ];
+  const remainingSongs = remainingIds.map(catalogTarget);
+  const visibleSongs = ["nigekiri", "pyoitto", "grow-up-shine"].map((id) =>
+    remainingSongs.find((candidate) => candidate.id === id)!,
+  );
+  const result = analyzeSongSelection({
+    period: "senior",
+    tokens: balance({
+      dance: 134,
+      passion: 104,
+      vocal: 107,
+      visual: 57,
+      mental: 127,
+    }),
+    visibleSongs,
+    remainingSongs,
+    techniquesToNextSong: 2,
+    songsThisSection: 2,
+    totalSongs: 12,
+    concertIndex: 3,
+    generationProfile: "speed-wit",
+    riskProfile: "standard",
+    nextSongCycle: 3,
+    timingMode: "deadline-now",
+    trials: 224,
+  });
+  assert.equal(result.recommended?.songId, "grow-up-shine");
 });

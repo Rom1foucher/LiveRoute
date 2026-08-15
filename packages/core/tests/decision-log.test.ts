@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  analysisProbabilityBreakdown,
   appendDecisionLog,
   decisionStateHash,
   loggedBalanceAfterConcert,
@@ -8,12 +9,14 @@ import {
   loggedTrackedBalanceAfterConcert,
   loggedTrackedBalanceAfterPurchase,
   configureDecisionLog,
+  wilson95,
   type DecisionLogState,
 } from "../src/diagnostics/decision-log.ts";
 import {
   browserDecisionSession,
   browserDecisionSink,
 } from "../src/adapters/browser.ts";
+import { runAnalysis } from "../src/live-model.ts";
 
 class StorageMock {
   private readonly values = new Map<string, string>();
@@ -58,7 +61,48 @@ test("le hash d'état est stable malgré l'ordre des offres", () => {
   );
 });
 
-test("le journal navigateur écrit un événement v3 lié et hashé", async () => {
+test("PR-6 : le hash d’état change avec l’état HUNT mais pas avec l’ordre de ses cibles", () => {
+  const base = state(["a", "b", "c"]);
+  const first = {
+    ...base,
+    huntState: {
+      targetIds: ["sp3-b", "sp3-a"],
+      pagesSeenWithoutTarget: 3,
+      committedTechniqueCost: {
+        dance: 21,
+        passion: 0,
+        vocal: 0,
+        visual: 12,
+        mental: 0,
+      },
+      fillerPurchasesWhileHunting: 1,
+      status: "active" as const,
+      lastObservedPageKey: "2:4",
+    },
+  };
+  const reordered = {
+    ...first,
+    huntState: {
+      ...first.huntState,
+      targetIds: ["sp3-a", "sp3-b"],
+      committedTechniqueCost: {
+        mental: 0,
+        visual: 12,
+        vocal: 0,
+        passion: 0,
+        dance: 21,
+      },
+    },
+  };
+  const extraMiss = {
+    ...first,
+    huntState: { ...first.huntState, pagesSeenWithoutTarget: 4 },
+  };
+  assert.equal(decisionStateHash(first), decisionStateHash(reordered));
+  assert.notEqual(decisionStateHash(first), decisionStateHash(extraMiss));
+});
+
+test("le journal navigateur écrit un événement v4 lié, versionné et hashé", async () => {
   const localStorage = new StorageMock();
   const sessionStorage = new StorageMock();
   Object.assign(globalThis, {
@@ -101,7 +145,8 @@ test("le journal navigateur écrit un événement v3 lié et hashé", async () =
     localStorage.getItem("grand-live-decision-log-v2") ?? "[]",
   ) as Array<Record<string, unknown>>;
   assert.equal(stored.length, 1);
-  assert.equal(stored[0].schemaVersion, 3);
+  assert.equal(stored[0].schemaVersion, 4);
+  assert.equal(stored[0].policyVersion, "grand-live-v6");
   assert.equal(stored[0].previousDecisionId, "decision-1");
   assert.match(String(stored[0].stateHash), /^C3-[0-9A-F]{8}$/);
   assert.equal(stored[0].stateAfterHash, decisionStateHash(stateAfter));
@@ -148,4 +193,72 @@ test("le journal ne fabrique plus un débit ou un +10 que le tracker n’a pas a
     loggedTrackedBalanceAfterConcert(tokens, 2, true),
     loggedBalanceAfterConcert(tokens, 2),
   );
+});
+
+test("Wilson 95 % reste borné et se resserre avec davantage d’échantillons", () => {
+  const small = wilson95(0.92, 180);
+  const large = wilson95(0.92, 12000);
+  assert.ok(small.lower >= 0 && small.upper <= 1);
+  assert.ok(large.lower >= 0 && large.upper <= 1);
+  assert.ok(large.upper - large.lower < small.upper - small.lower);
+});
+
+test("v4 distingue P(page) de P(outcome terminal utilisable)", () => {
+  const base = runAnalysis({
+    period: "senior",
+    tokens: state([]).tokens,
+    techniquesRemaining: 0,
+    objective: "carryover",
+    seedKey: "decision-log-probability-breakdown",
+    trials: 80,
+  });
+  const result = {
+    ...base,
+    terminalDecision: {
+      applicable: true as const,
+      action: "stop-now" as const,
+      reason: {
+        code: "terminal.stopNow" as const,
+        gain: { code: "terminal.gainNone" as const },
+      },
+      trials: 80,
+      maxTrials: 80,
+      converged: false,
+      uncertainAtBudgetLimit: true,
+      seedKey: "terminal:fixture",
+      canonicalActionKey: "tech:fixture",
+      reachProbability: 0.75,
+      expectedCommittedCost: 0,
+      expectedWeightedCommittedCost: 0,
+      expectedOpportunityCost: 0,
+      riskThreshold: 0.92,
+      catastropheFloor: 0.72,
+      reachConfidenceLowerBound: 0.65,
+      grossValue: 0,
+      riskPenalty: 0,
+      netValue: 0,
+      stopCheckpointProbability: 0,
+      pushCheckpointProbability: 0,
+      stopTargetProbability: 0,
+      pushTargetProbability: 0,
+      stopFriendship10Probability: 0,
+      pushFriendship10Probability: 0,
+      stopEffectiveFriendship10Probability: 0,
+      pushEffectiveFriendship10Probability: 0,
+      stopExpectedFriendshipBonus: 0,
+      pushExpectedFriendshipBonus: 0,
+      stopExpectedFriendshipTrainingExposure: 0,
+      pushExpectedFriendshipTrainingExposure: 0,
+      stopExpectedSpTrainingExposure: 0,
+      pushExpectedSpTrainingExposure: 0,
+      stopExpectedPracticeTrainingExposure: 0,
+      pushExpectedPracticeTrainingExposure: 0,
+      stopExpectedStructuralPurchases: 0,
+      pushExpectedStructuralPurchases: 0,
+      decisionVector: [],
+    },
+  };
+  const breakdown = analysisProbabilityBreakdown(result);
+  assert.equal(breakdown.pageReachProbability, 1);
+  assert.equal(breakdown.terminalUsableOutcomeProbability, 0.75);
 });

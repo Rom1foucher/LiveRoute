@@ -12,14 +12,20 @@ export const selectCarryoverPolicy = ({
 }): SongPolicyEvaluation | null => {
   const isUsableCarry = (
     policy: SongPolicyEvaluation | null,
-  ): policy is SongPolicyEvaluation =>
-    Boolean(
-      policy &&
-      policy.action === "carry-page" &&
-      policy.valid &&
-      policy.songId &&
-      visibleSongIds.has(policy.songId),
+  ): policy is SongPolicyEvaluation => {
+    if (!policy || policy.action !== "carry-page" || !policy.valid)
+      return false;
+    const carriedIds =
+      policy.carriedSongIds && policy.carriedSongIds.length > 0
+        ? policy.carriedSongIds
+        : policy.songId
+          ? [policy.songId]
+          : [];
+    return (
+      carriedIds.length === visibleSongIds.size &&
+      carriedIds.every((id) => visibleSongIds.has(id))
     );
+  };
 
   if (isUsableCarry(displayed)) return displayed;
 

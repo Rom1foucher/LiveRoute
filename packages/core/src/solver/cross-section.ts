@@ -1,9 +1,14 @@
 import {
   TOKEN_KEYS,
+  acquiredEffectsForSong,
+  acquiredFriendshipEffect,
   canAfford,
   createTechniqueSimulationMemo,
+  effectExposure,
+  estimateRemainingTrainingsByFacility,
   subtractCost,
   totalCost,
+  type AcquiredEffect,
   type Balance,
   type GenerationProfile,
   type Period,
@@ -18,6 +23,9 @@ import {
 } from "../domain/live-rules.ts";
 import {
   deriveStrategicPlan,
+  isChaseTarget,
+  isVisibleOptionalTarget,
+  structuralTier,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
 import {
@@ -46,6 +54,9 @@ export type CrossSectionReadinessInput = {
   laterSongs?: SongTarget[];
   totalSongsBeforeNextSection: number;
   currentContinuation?: CurrentSectionContinuation;
+  /** Complete song page preserved across the Promotional Live. */
+  carriedPage?: readonly SongTarget[] | null;
+  /** @deprecated v1 compatibility: interpreted as a one-song carried page. */
   carriedSong?: SongTarget | null;
   riskProfile?: RiskProfile;
   generationProfile?: GenerationProfile;
@@ -83,6 +94,10 @@ export type CrossSectionTrialResult = {
   friendship10Acquired: boolean;
   friendshipBonus: number;
   friendshipPurchases: number;
+  acquiredEffects: readonly AcquiredEffect[];
+  friendshipTrainingExposure: number;
+  spTrainingExposure: number;
+  practiceTrainingExposure: number;
   structuralPurchases: number;
   purchases: number;
   techniquePurchases: number;
@@ -102,7 +117,11 @@ export type CrossSectionReadinessResult = {
   checkpointState: 0 | 1 | 2;
   targetProbability: number;
   friendship10Probability: number;
+  effectiveFriendship10Probability: number;
   expectedFriendshipBonus: number;
+  expectedFriendshipTrainingExposure: number;
+  expectedSpTrainingExposure: number;
+  expectedPracticeTrainingExposure: number;
   expectedFriendshipPurchases: number;
   expectedStructuralPurchases: number;
   expectedPurchases: number;
@@ -185,34 +204,116 @@ export const simulateCrossSectionReadinessTrial = (
     1,
     Math.trunc(input.maxNextSectionPages ?? 7),
   );
+  // A carried page is an exposed physical state, not merely a song that must
+  // already be present in a reconstructed pool. Keep the v1 one-song adapter
+  // faithful by injecting that known page before any rollout filtering.
+  const carriedPage = uniqueSongs(
+    input.carriedPage && input.carriedPage.length > 0
+      ? [...input.carriedPage]
+      : input.carriedSong
+        ? [input.carriedSong]
+        : [],
+  );
   let nextPool = uniqueSongs([
     ...input.currentPool,
     ...(input.futureSongs ?? []),
+    ...carriedPage,
   ]);
   let nextTotalSongs = input.totalSongsBeforeNextSection;
   let nextSectionManualSongs = 0;
-  let carried = false;
-  let carriedSongPurchases = 0;
+  let carriedPagePurchases = 0;
+  let carriedFriendshipBonus = 0;
+  let carriedFriendshipPurchases = 0;
+  let carriedFriendship10 = false;
+  let carriedEffects: AcquiredEffect[] = [];
+  let carriedStructuralPurchases = 0;
+  let carriedTargetAcquired = false;
   let nextBalance = applyPromotionalLiveTransition(
     input.balanceBeforeLive,
     input.completedConcertIndex,
   );
 
-  if (input.carriedSong) {
-    if (!canAfford(nextBalance, input.carriedSong.cost)) return null;
-    nextBalance = subtractCost(nextBalance, input.carriedSong.cost);
-    nextPool = nextPool.filter((song) => song.id !== input.carriedSong?.id);
-    nextTotalSongs += 1;
-    nextSectionManualSongs = 1;
-    carried = true;
-    carriedSongPurchases = 1;
-  }
-
-  const nextPlan = deriveStrategicPlan({
+  let nextPlan = deriveStrategicPlan({
     concertIndex: nextConcertIndex,
     timingMode: "section-open",
     remainingSongs: nextPool,
   });
+
+  if (carriedPage.length > 0) {
+    // The physical action carries the whole known page. Only after the +10
+    // transition do we re-evaluate which (if any) of those songs to buy.
+    const affordable = carriedPage.filter((song) =>
+      canAfford(nextBalance, song.cost),
+    );
+    const mustBuyForFinalGauge =
+      nextConcertIndex === 4 && manualSongsForGreatSuccess(4) > 0;
+    const strategic = affordable.filter(
+      (song) =>
+        isChaseTarget(song, nextPlan) ||
+        isVisibleOptionalTarget(song, nextPlan),
+    );
+    const hiddenChaseStillExists = nextPool.some(
+      (song) =>
+        !carriedPage.some((visible) => visible.id === song.id) &&
+        isChaseTarget(song, nextPlan),
+    );
+    const admitted = mustBuyForFinalGauge
+      ? affordable
+      : strategic.length > 0
+        ? strategic
+        : hiddenChaseStillExists && nextPlan.mode !== "hold"
+          ? affordable
+          : [];
+    const selected = admitted
+      .map((song) => ({
+        song,
+        target: isChaseTarget(song, nextPlan) ? 1 : 0,
+        structural: structuralTier(song, nextPlan),
+        retained: totalCost(subtractCost(nextBalance, song.cost)),
+        cost: totalCost(song.cost),
+      }))
+      .sort(
+        (left, right) =>
+          right.target - left.target ||
+          right.structural - left.structural ||
+          right.retained - left.retained ||
+          left.cost - right.cost ||
+          left.song.id.localeCompare(right.song.id),
+      )[0]?.song;
+
+    if (selected) {
+      nextBalance = subtractCost(nextBalance, selected.cost);
+      nextPool = nextPool.filter((song) => song.id !== selected.id);
+      nextTotalSongs += 1;
+      nextSectionManualSongs = 1;
+      carriedPagePurchases = 1;
+      carriedTargetAcquired = isChaseTarget(selected, nextPlan);
+      const tier = structuralTier(selected, nextPlan);
+      carriedStructuralPurchases = tier > 0 ? 1 : 0;
+      carriedFriendshipBonus = selected.roles?.includes("friendship-10")
+        ? 10
+        : selected.roles?.includes("friendship-5")
+          ? 5
+          : 0;
+      carriedFriendshipPurchases = carriedFriendshipBonus > 0 ? 1 : 0;
+      carriedFriendship10 = carriedFriendshipBonus >= 10;
+      carriedEffects = acquiredEffectsForSong({
+        song: selected,
+        concertIndex: nextConcertIndex,
+        remainingTrainingsByFacility: estimateRemainingTrainingsByFacility(
+          generationProfile,
+          nextConcertIndex,
+        ),
+      });
+      nextPlan = deriveStrategicPlan({
+        concertIndex: nextConcertIndex,
+        timingMode: "section-open",
+        remainingSongs: nextPool,
+        songsThisSection: 1,
+      });
+    }
+  }
+
   // Raw song-count checkpoints (16 and 18) are diagnostics only. Cross-section
   // rollouts may require purchases solely to complete the final Great Success
   // gauge, never to move a counter closer to 18.
@@ -222,26 +323,56 @@ export const simulateCrossSectionReadinessTrial = (
       ? Math.max(0, manualSongsForGreatSuccess(4) - nextSectionManualSongs)
       : 0;
   const requiredPurchases = finalGaugeMissing;
+
+  // A carried page that cannot be bought remains physically open. With no
+  // invented training income, the bounded rollout cannot expose another page.
+  if (carriedPage.length > 0 && carriedPagePurchases === 0) {
+    return {
+      nextConcertIndex,
+      nextPlanId: nextPlan.id,
+      checkpointRequired: checkpoint,
+      checkpointMet: requiredPurchases === 0,
+      targetAcquired: nextPlan.mode !== "hunt",
+      friendship10Acquired: false,
+      friendshipBonus: 0,
+      friendshipPurchases: 0,
+      acquiredEffects: [],
+      friendshipTrainingExposure: 0,
+      spTrainingExposure: 0,
+      practiceTrainingExposure: 0,
+      structuralPurchases: 0,
+      purchases: 0,
+      techniquePurchases: 0,
+      lessonSkillPoints: 0,
+      totalSongs: nextTotalSongs,
+      retainedBalance: nextBalance,
+      remainingPool: nextPool,
+    };
+  }
+
   const nextPages = Math.min(maxNextSectionPages, nextPool.length);
-  const firstTechniqueCount = carried
-    ? 1
-    : (techniquesForSongCycle(nextConcertIndex, 1) ?? 0);
+  const firstTechniqueCount =
+    carriedPagePurchases > 0
+      ? 1
+      : (techniquesForSongCycle(nextConcertIndex, 1) ?? 0);
   const nextResult = simulateTransitionAwareSongPagesTrial(
     {
       period: nextPeriod,
-      firstOfferPeriod: carried
-        ? nextPeriod
-        : (input.currentFirstOfferPeriod ?? input.currentPeriod),
+      firstOfferPeriod:
+        carriedPagePurchases > 0
+          ? nextPeriod
+          : (input.currentFirstOfferPeriod ?? input.currentPeriod),
       balance: nextBalance,
       pool: nextPool,
       reserveSongs: nextPool,
       plan: nextPlan,
       concertIndex: nextConcertIndex,
+      songsThisSection: nextSectionManualSongs,
       nextSongCycle: 1,
       techniquesToNextSong: firstTechniqueCount,
       pages: nextPages,
       requiredPurchases,
-      acquiredPlanTarget: false,
+      acquiredPlanTarget: carriedTargetAcquired,
       timingMode: "section-open",
       continueForStructuralValue: true,
       riskProfile,
@@ -252,20 +383,29 @@ export const simulateCrossSectionReadinessTrial = (
     techniqueMemo,
   );
 
+  const acquiredEffects = [...carriedEffects, ...nextResult.acquiredEffects];
+
   return {
     nextConcertIndex,
     nextPlanId: nextPlan.id,
     checkpointRequired: checkpoint,
     checkpointMet: nextResult.checkpointMet,
-    targetAcquired: nextResult.targetAcquired,
-    friendship10Acquired: nextResult.friendship10Acquired,
-    friendshipBonus: nextResult.friendshipBonus,
-    friendshipPurchases: nextResult.friendshipPurchases,
-    structuralPurchases: nextResult.structuralPurchases,
-    purchases: nextResult.purchases + carriedSongPurchases,
+    targetAcquired: carriedTargetAcquired || nextResult.targetAcquired,
+    friendship10Acquired:
+      carriedFriendship10 || nextResult.friendship10Acquired,
+    friendshipBonus: carriedFriendshipBonus + nextResult.friendshipBonus,
+    friendshipPurchases:
+      carriedFriendshipPurchases + nextResult.friendshipPurchases,
+    acquiredEffects,
+    friendshipTrainingExposure: effectExposure(acquiredEffects, "friendship"),
+    spTrainingExposure: effectExposure(acquiredEffects, "sp-training"),
+    practiceTrainingExposure: effectExposure(acquiredEffects, "practice"),
+    structuralPurchases:
+      carriedStructuralPurchases + nextResult.structuralPurchases,
+    purchases: nextResult.purchases + carriedPagePurchases,
     techniquePurchases: nextResult.techniquePurchases,
     lessonSkillPoints:
-      (nextResult.purchases + carriedSongPurchases) * 25 +
+      (nextResult.purchases + carriedPagePurchases) * 25 +
       nextResult.techniquePurchases * 5,
     totalSongs: nextTotalSongs + nextResult.purchases,
     retainedBalance: nextResult.retainedBalance,
@@ -292,7 +432,11 @@ export const evaluateCrossSectionReadiness = (
   let checkpointSuccesses = 0;
   let targetSuccesses = 0;
   let friendship10Successes = 0;
+  let effectiveFriendship10Successes = 0;
   let friendshipBonusTotal = 0;
+  let friendshipTrainingExposureTotal = 0;
+  let spTrainingExposureTotal = 0;
+  let practiceTrainingExposureTotal = 0;
   let friendshipPurchaseTotal = 0;
   let structuralPurchaseTotal = 0;
   let purchaseTotal = 0;
@@ -334,6 +478,7 @@ export const evaluateCrossSectionReadiness = (
         futureSongs: input.futureSongs,
         totalSongsBeforeNextSection:
           input.totalSongsBeforeNextSection + (currentResult?.purchases ?? 0),
+        carriedPage: input.carriedPage,
         carriedSong: input.carriedSong,
         riskProfile,
         generationProfile,
@@ -379,6 +524,28 @@ export const evaluateCrossSectionReadiness = (
       (currentResult?.friendshipPurchases ?? 0) +
       immediateResult.friendshipPurchases +
       (laterResult?.friendshipPurchases ?? 0);
+    const activatedFriendshipEffect = acquiredFriendshipEffect({
+      magnitude: Math.max(0, input.activatedFriendshipBonus ?? 0),
+      concertIndex: input.completedConcertIndex,
+    });
+    const chainedEffects: AcquiredEffect[] = [
+      ...(currentResult?.acquiredEffects ?? []),
+      ...immediateResult.acquiredEffects,
+      ...(laterResult?.acquiredEffects ?? []),
+      ...(activatedFriendshipEffect ? [activatedFriendshipEffect] : []),
+    ];
+    const chainedFriendshipTrainingExposure = effectExposure(
+      chainedEffects,
+      "friendship",
+    );
+    const chainedSpTrainingExposure = effectExposure(
+      chainedEffects,
+      "sp-training",
+    );
+    const chainedPracticeTrainingExposure = effectExposure(
+      chainedEffects,
+      "practice",
+    );
     const chainedStructuralPurchases =
       (currentResult?.structuralPurchases ?? 0) +
       immediateResult.structuralPurchases +
@@ -401,10 +568,7 @@ export const evaluateCrossSectionReadiness = (
     representativePlan ??= deriveStrategicPlan({
       concertIndex: nextResult.nextConcertIndex,
       timingMode: "section-open",
-      remainingSongs: uniqueSongs([
-        ...(currentResult?.remainingPool ?? input.currentPool),
-        ...(input.futureSongs ?? []),
-      ]).filter((song) => song.id !== input.carriedSong?.id),
+      remainingSongs: nextResult.remainingPool,
     });
     representativeCheckpoint ??= nextResult.checkpointRequired;
     if (immediateResult.checkpointMet && nextResult.checkpointMet) {
@@ -421,8 +585,21 @@ export const evaluateCrossSectionReadiness = (
     ) {
       friendship10Successes += 1;
     }
+    if (
+      chainedEffects.some(
+        (effect) =>
+          effect.kind === "friendship" &&
+          effect.magnitude >= 10 &&
+          effect.effectiveTrainingExposure > 0,
+      )
+    ) {
+      effectiveFriendship10Successes += 1;
+    }
     friendshipBonusTotal +=
       chainedFriendshipBonus + Math.max(0, input.activatedFriendshipBonus ?? 0);
+    friendshipTrainingExposureTotal += chainedFriendshipTrainingExposure;
+    spTrainingExposureTotal += chainedSpTrainingExposure;
+    practiceTrainingExposureTotal += chainedPracticeTrainingExposure;
     friendshipPurchaseTotal += chainedFriendshipPurchases;
     structuralPurchaseTotal += chainedStructuralPurchases;
     purchaseTotal += chainedPurchases;
@@ -440,6 +617,11 @@ export const evaluateCrossSectionReadiness = (
   const checkpointState: 0 | 1 | 2 =
     checkpointProbability >= threshold ? 2 : checkpointProbability > 0 ? 1 : 0;
   const expectedFriendshipBonus = friendshipBonusTotal / denominator;
+  const expectedFriendshipTrainingExposure =
+    friendshipTrainingExposureTotal / denominator;
+  const expectedSpTrainingExposure = spTrainingExposureTotal / denominator;
+  const expectedPracticeTrainingExposure =
+    practiceTrainingExposureTotal / denominator;
   const expectedFriendshipPurchases = friendshipPurchaseTotal / denominator;
   const expectedStructuralPurchases = structuralPurchaseTotal / denominator;
   const expectedPurchases = purchaseTotal / denominator;
@@ -453,6 +635,8 @@ export const evaluateCrossSectionReadiness = (
     currentSectionCompletions / denominator;
   const targetProbability = targetSuccesses / denominator;
   const friendship10Probability = friendship10Successes / denominator;
+  const effectiveFriendship10Probability =
+    effectiveFriendship10Successes / denominator;
   const nextConcertIndex = input.completedConcertIndex + 1;
 
   return {
@@ -467,7 +651,11 @@ export const evaluateCrossSectionReadiness = (
     checkpointState,
     targetProbability,
     friendship10Probability,
+    effectiveFriendship10Probability,
     expectedFriendshipBonus,
+    expectedFriendshipTrainingExposure,
+    expectedSpTrainingExposure,
+    expectedPracticeTrainingExposure,
     expectedFriendshipPurchases,
     expectedStructuralPurchases,
     expectedPurchases,
@@ -488,8 +676,10 @@ export const evaluateCrossSectionReadiness = (
       // 16/18 remain diagnostic while evaluating a Promotional-Live choice.
       // Structural song quality and activation timing must not be pre-empted by
       // a future raw song-count checkpoint.
-      friendship10Probability,
-      expectedFriendshipBonus,
+      effectiveFriendship10Probability,
+      expectedFriendshipTrainingExposure,
+      expectedSpTrainingExposure,
+      expectedPracticeTrainingExposure,
       targetProbability,
       expectedStructuralPurchases,
       expectedLessonSkillPoints,

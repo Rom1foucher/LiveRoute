@@ -1,10 +1,14 @@
 import {
   TOKEN_KEYS,
+  acquiredEffectsForSong,
   canAfford,
   createTechniqueSimulationMemo,
+  effectExposure,
+  estimateRemainingTrainingsByFacility,
   simulateTechniqueTransition,
   subtractCost,
   totalCost,
+  type AcquiredEffect,
   type AnalysisObjective,
   type Balance,
   type GenerationProfile,
@@ -25,6 +29,8 @@ import {
 } from "../planner/strategic-plan.ts";
 import { evaluatePageCoverage } from "./song-dp.ts";
 import { riskThreshold } from "./value.ts";
+import { intervalCrosses, wilsonInterval } from "../monte-carlo.ts";
+import { deriveReachableDemands } from "./resource-economy.ts";
 
 export type TransitionAwareSongPagesInput = {
   period: Period;
@@ -73,6 +79,10 @@ export type TransitionAwareTrialResult = {
   friendshipPurchases: number;
   friendshipBonus: number;
   friendship10Acquired: boolean;
+  acquiredEffects: readonly AcquiredEffect[];
+  friendshipTrainingExposure: number;
+  spTrainingExposure: number;
+  practiceTrainingExposure: number;
 };
 
 export type TransitionAwareSongPagesResult = {
@@ -91,12 +101,16 @@ export type TransitionAwareSongPagesResult = {
   expectedStructuralPurchases: number;
   expectedFriendshipPurchases: number;
   expectedFriendshipBonus: number;
+  expectedFriendshipTrainingExposure: number;
+  expectedSpTrainingExposure: number;
+  expectedPracticeTrainingExposure: number;
   friendship10AcquisitionProbability: number;
   pages: number;
   /** Actual deterministic samples consumed after convergence. */
   trials: number;
   maxTrials: number;
   converged: boolean;
+  uncertainAtBudgetLimit: boolean;
   exactEnumeration: false;
   lawConfidence: "heuristic";
   pageLaw: "uniform";
@@ -305,6 +319,11 @@ export const simulateTransitionAwareSongPagesTrial = (
   let friendshipPurchases = 0;
   let friendshipBonus = 0;
   let friendship10Acquired = false;
+  const acquiredEffects: AcquiredEffect[] = [];
+  const remainingTrainingsByFacility = estimateRemainingTrainingsByFacility(
+    generationProfile,
+    concertIndex,
+  );
   let firstPageReached = false;
   let firstPageAnyAffordable = false;
   let firstPageTargetAffordable = false;
@@ -326,6 +345,16 @@ export const simulateTransitionAwareSongPagesTrial = (
       !targetWork;
     if (!hardWork && !targetWork && !optionalStructuralWork) break;
 
+    const transitionResourceDemands = deriveReachableDemands({
+      currentSongs: currentPool,
+      futureSongs: externalReserveSongs,
+      plan: currentPlan,
+      concertIndex,
+      timingMode,
+      requiredPurchases: hardWork
+        ? Math.max(1, requiredPurchases - purchases)
+        : 0,
+    });
     const transition = simulateTechniqueTransition({
       period,
       firstOfferPeriod: pageIndex === 0 ? firstOfferPeriod : period,
@@ -338,6 +367,7 @@ export const simulateTransitionAwareSongPagesTrial = (
         reserveIds,
         externalReserveSongs,
       ),
+      resourceDemands: transitionResourceDemands,
       objective: objectiveFor(hardWork, targetWork),
       strategicPlan: currentPlan,
       riskProfile,
@@ -397,6 +427,13 @@ export const simulateTransitionAwareSongPagesTrial = (
       friendshipBonus += friendship;
       friendship10Acquired ||= friendship >= 10;
     }
+    acquiredEffects.push(
+      ...acquiredEffectsForSong({
+        song: selected,
+        concertIndex,
+        remainingTrainingsByFacility,
+      }),
+    );
     currentPool = currentPool.filter((song) => song.id !== selected.id);
     if (acquiredCurrentTarget || currentPlan.mode === "hunt") {
       currentPlan = deriveStrategicPlan({
@@ -424,6 +461,10 @@ export const simulateTransitionAwareSongPagesTrial = (
     friendshipPurchases,
     friendshipBonus,
     friendship10Acquired,
+    acquiredEffects,
+    friendshipTrainingExposure: effectExposure(acquiredEffects, "friendship"),
+    spTrainingExposure: effectExposure(acquiredEffects, "sp-training"),
+    practiceTrainingExposure: effectExposure(acquiredEffects, "practice"),
   };
 };
 
@@ -432,25 +473,6 @@ export const simulateTransitionAwareSongPagesTrial = (
  * pages. Unlike `evaluateUnknownSongPages`, every page is paid for before its
  * draw. No future training income is introduced.
  */
-const wilsonInterval = (
-  successes: number,
-  samples: number,
-  z = 1.96,
-): readonly [number, number] => {
-  if (samples <= 0) return [0, 1];
-  const probability = Math.min(1, Math.max(0, successes / samples));
-  const z2 = z * z;
-  const denominator = 1 + z2 / samples;
-  const centre = probability + z2 / (2 * samples);
-  const margin =
-    z *
-    Math.sqrt((probability * (1 - probability) + z2 / (4 * samples)) / samples);
-  return [
-    Math.max(0, (centre - margin) / denominator),
-    Math.min(1, (centre + margin) / denominator),
-  ];
-};
-
 const stableTransitionEstimate = ({
   samples,
   minimumSamples,
@@ -478,10 +500,7 @@ const stableTransitionEstimate = ({
   const importantThresholds = [0.5, 0.8, threshold];
   return intervals.every((interval) => {
     const width = interval[1] - interval[0];
-    const crosses = importantThresholds.some(
-      (value) => interval[0] < value && interval[1] >= value,
-    );
-    return width <= 0.04 && !crosses;
+    return width <= 0.04 && !intervalCrosses(interval, importantThresholds);
   });
 };
 
@@ -509,6 +528,9 @@ export const evaluateTransitionAwareSongPages = (
   let structuralPurchaseTotal = 0;
   let friendshipPurchaseTotal = 0;
   let friendshipBonusTotal = 0;
+  let friendshipTrainingExposureTotal = 0;
+  let spTrainingExposureTotal = 0;
+  let practiceTrainingExposureTotal = 0;
   let friendship10Successes = 0;
   const techniqueMemo = createTechniqueSimulationMemo();
   const threshold = riskThreshold(input.riskProfile ?? "standard");
@@ -535,6 +557,9 @@ export const evaluateTransitionAwareSongPages = (
     structuralPurchaseTotal += result.structuralPurchases;
     friendshipPurchaseTotal += result.friendshipPurchases;
     friendshipBonusTotal += result.friendshipBonus;
+    friendshipTrainingExposureTotal += result.friendshipTrainingExposure;
+    spTrainingExposureTotal += result.spTrainingExposure;
+    practiceTrainingExposureTotal += result.practiceTrainingExposure;
     for (const key of TOKEN_KEYS) {
       retainedBalanceTotal[key] += result.retainedBalance[key];
     }
@@ -555,6 +580,17 @@ export const evaluateTransitionAwareSongPages = (
   }
 
   const denominator = Math.max(1, actualTrials);
+  const finalEstimateStable = stableTransitionEstimate({
+    samples: denominator,
+    minimumSamples,
+    checkpointSuccesses,
+    targetSuccesses,
+    firstPageReached,
+    firstPageTargetAffordable,
+    threshold,
+  });
+  const uncertainAtBudgetLimit =
+    denominator >= maxTrials && !finalEstimateStable;
   return {
     checkpointProbability: checkpointSuccesses / denominator,
     targetProbability: targetSuccesses / denominator,
@@ -575,11 +611,17 @@ export const evaluateTransitionAwareSongPages = (
     expectedStructuralPurchases: structuralPurchaseTotal / denominator,
     expectedFriendshipPurchases: friendshipPurchaseTotal / denominator,
     expectedFriendshipBonus: friendshipBonusTotal / denominator,
+    expectedFriendshipTrainingExposure:
+      friendshipTrainingExposureTotal / denominator,
+    expectedSpTrainingExposure: spTrainingExposureTotal / denominator,
+    expectedPracticeTrainingExposure:
+      practiceTrainingExposureTotal / denominator,
     friendship10AcquisitionProbability: friendship10Successes / denominator,
     pages: boundedPages,
     trials: denominator,
     maxTrials,
-    converged: denominator < maxTrials,
+    converged: finalEstimateStable,
+    uncertainAtBudgetLimit,
     exactEnumeration: false,
     lawConfidence: "heuristic",
     pageLaw: "uniform",

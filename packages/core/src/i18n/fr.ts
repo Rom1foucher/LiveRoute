@@ -141,6 +141,10 @@ export const renderFr = (message: Message): string => {
       return `abandon HUNT : ${fixed1(message.probability)} % de trouver et financer la cible, sous le seuil ${fixed0(message.floor)} %`;
     case "reason.huntContinuationRefused":
       return `${renderFr(message.cause)} · continuation HUNT refusée`;
+    case "reason.huntAbandonMarginalValue":
+      return `abandon HUNT après ${message.pages} page(s) ratée(s) : ${fixed1(message.probability)} % find & fund, valeur marginale ${message.netValue.toFixed(1)}`;
+    case "reason.huntContinueMarginalValue":
+      return `poursuite HUNT après ${message.pages} page(s) ratée(s) : ${fixed1(message.probability)} % find & fund, valeur marginale ${message.netValue >= 0 ? "+" : ""}${message.netValue.toFixed(1)}`;
     case "reason.securesGreatSuccess":
       return "sécurise Great Success";
     case "reason.nextSectionCheckpoint": {
@@ -158,7 +162,7 @@ export const renderFr = (message: Message): string => {
         message.horizonSections === 2
           ? "jusqu’à C4"
           : "sur la section suivante";
-      return `valeur inter-section sans revenu futur : ${tenth(message.friendshipBonus)} % Friendship et ${whole(message.lessonSkillPoints)} SP de lessons attendus ${horizon}`;
+      return `valeur inter-section sans revenu futur : ${tenth(message.friendshipBonus)} % Friendship acquis, exposition ${tenth(message.friendshipTrainingExposure)} %·entraînement, SP-training ${tenth(message.spTrainingExposure)}, autres entraînements ${tenth(message.practiceTrainingExposure)}, et ${whole(message.lessonSkillPoints)} SP de lessons attendus ${horizon}`;
     }
     case "reason.boundedLessonSkillPoints":
       return `${message.points} SP de lessons sur ce chemin borné`;
@@ -175,7 +179,7 @@ export const renderFr = (message: Message): string => {
     case "reason.carryNextSectionCheckpoint":
       return `${pct1(message.probability)} % sur ${message.horizonSections === 2 ? "l’horizon C4" : "la section suivante"} après transition(s) vérifiée(s) +10`;
     case "reason.carryNextSectionValue":
-      return `valeur inter-section sans revenu futur : ${tenth(message.friendshipBonus)} % Friendship et ${whole(message.lessonSkillPoints)} SP de lessons attendus`;
+      return `valeur inter-section sans revenu futur : ${tenth(message.friendshipBonus)} % Friendship acquis, exposition ${tenth(message.friendshipTrainingExposure)} %·entraînement, SP-training ${tenth(message.spTrainingExposure)}, autres entraînements ${tenth(message.practiceTrainingExposure)}, et ${whole(message.lessonSkillPoints)} SP de lessons attendus`;
     case "reason.carriedSongLessonSkillPoints":
       return `${message.points} SP de lesson à l’achat de la song portée`;
 
@@ -199,7 +203,7 @@ export const renderFr = (message: Message): string => {
         message.horizonSections === 2
           ? "jusqu’à C4"
           : "sur la section suivante";
-      return `${tenth(message.friendshipBonus)} % Friendship attendu ${horizon}, techniques et songs payées`;
+      return `${tenth(message.friendshipBonus)} % Friendship acquis ${horizon}, exposition effective ${tenth(message.friendshipTrainingExposure)} %·entraînement, techniques et songs payées`;
     }
     case "reason.greatSuccessSecured":
       return "Great Success est déjà sécurisé";
@@ -271,6 +275,12 @@ export const renderFr = (message: Message): string => {
       return "STOP_NOW : la page portée n’est pas atteinte assez sûrement";
     case "terminal.stopNow":
       return `STOP_NOW : ${renderFr(message.gain)}`;
+    case "terminal.exposeAndCarryValue":
+      return `EXPOSE_AND_CARRY · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowValue":
+      return `STOP_NOW · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowCatastropheFloor":
+      return `STOP_NOW · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % sous le plancher catastrophe ${pct1(message.catastropheFloor)} %`;
 
     // ── Token reserve explanation ──────────────────────────────────────────
     case "reserve.noNearbyTarget":

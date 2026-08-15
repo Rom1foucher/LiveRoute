@@ -24,6 +24,38 @@ const progressListeners = new Set<(value: OcrProgress) => void>();
 let workerPromise: Promise<Worker> | null = null;
 let tesseractPromise: Promise<typeof import("tesseract.js")> | null = null;
 
+const OCR_INITIALIZATION_TIMEOUT_MS = 20_000;
+const OCR_RECOGNITION_TIMEOUT_MS = 30_000;
+
+const withTimeout = <T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const timeout = window.setTimeout(
+      () => reject(new Error(message)),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => {
+        window.clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        window.clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+
+const discardWorker = () => {
+  const pending = workerPromise;
+  workerPromise = null;
+  if (!pending) return;
+  void pending.then((worker) => worker.terminate()).catch(() => undefined);
+};
+
 /** Keep the OCR runtime out of the initial desktop bundle until Live OCR opens. */
 const getTesseract = () => {
   if (!tesseractPromise) {
@@ -57,7 +89,7 @@ const getWorker = (): Promise<Worker> => {
           errorHandler: (error) => {
             const message =
               error instanceof Error ? error.message : String(error);
-            notify({ status: `OCR error: ${message}`, progress: 0 });
+            notify({ status: `Erreur OCR : ${message}`, progress: 0 });
           },
         });
         await worker.setParameters({
@@ -68,10 +100,19 @@ const getWorker = (): Promise<Worker> => {
         return worker;
       },
     );
-    const recoverableInitialization = initialization.catch((error) => {
-      // A rejected cached promise would make every subsequent snapshot fail
-      // until reload. Drop it so the next attempt can recreate the worker.
+    const recoverableInitialization = withTimeout(
+      initialization,
+      OCR_INITIALIZATION_TIMEOUT_MS,
+      "Initialisation OCR expirée. Les ressources Tesseract locales sont peut-être absentes ou bloquées.",
+    ).catch((error) => {
+      // A rejected or stalled cached promise would make every subsequent
+      // snapshot fail until reload. Drop it so the next attempt can recreate
+      // the worker. If the underlying initialization eventually completes
+      // after our timeout, terminate that orphan worker explicitly.
       workerPromise = null;
+      void initialization
+        .then((worker) => worker.terminate())
+        .catch(() => undefined);
       throw error;
     });
     workerPromise = recoverableInitialization;
@@ -202,11 +243,21 @@ const recognizeWordsWithTesseract: AtlasWordRecognizer = async ({
             : PSM.SPARSE_TEXT,
     tessedit_char_whitelist: numericMode ? "0123456789" : "",
   });
-  const result = await worker.recognize(
-    atlas.canvas,
-    {},
-    { text: true, blocks: true, tsv: true },
-  );
+  let result: Awaited<ReturnType<Worker["recognize"]>>;
+  try {
+    result = await withTimeout(
+      worker.recognize(
+        atlas.canvas,
+        {},
+        { text: true, blocks: true, tsv: true },
+      ),
+      OCR_RECOGNITION_TIMEOUT_MS,
+      "Reconnaissance OCR expirée. Le worker Tesseract sera recréé à la prochaine capture.",
+    );
+  } catch (error) {
+    discardWorker();
+    throw error;
+  }
   const fromBlocks = flattenBlockWords(result.data.blocks);
   return fromBlocks.length > 0 ? fromBlocks : parseTsvWords(result.data.tsv);
 };

@@ -140,3 +140,22 @@ export const assessStockContinuity = (
     broadStateDrift: issues.length >= 3,
   };
 };
+
+/**
+ * A single sharp OCR-shaped discontinuity must not silently mutate solver
+ * state. Broad multi-colour drift is left reviewable because it commonly
+ * means the player advanced the run outside OCR.
+ */
+export const stockContinuityRequiresConfirmation = (
+  assessment: StockContinuityAssessment | null,
+): boolean =>
+  Boolean(
+    assessment &&
+    !assessment.broadStateDrift &&
+    assessment.issues.some(
+      (issue) =>
+        issue.strongOcrSignal ||
+        issue.kind === "abrupt-drop" ||
+        issue.kind === "huge-mismatch",
+    ),
+  );

@@ -50,7 +50,7 @@ export function ProgressPanel({
     automaticGaugeSongs,
     availableSongs,
     carryoverPolicy,
-    carryoverSongIds,
+    carriedPageSongIds,
     concertIndex,
     concertTransitionBlock,
     expectedOfferCount,
@@ -195,7 +195,7 @@ export function ProgressPanel({
           <div className={songSelectionOpen ? "ready" : ""}>
             <span>{L.progress.etat}</span>
             <strong>
-              {carryoverSongIds
+              {carriedPageSongIds
                 ? L.progress.carryoverAAcheter
                 : remaining === 0
                   ? L.progress.songDebloquee
@@ -231,14 +231,14 @@ export function ProgressPanel({
       </div>
       <div className="route-summary">
         <strong>
-          {carryoverSongIds
+          {carriedPageSongIds
             ? L.progress.selectionCarryoverEncoreOuverte
             : remaining === 0
               ? L.progress.selectionAtteinte
               : L.progress.techniquesBeforeSong(remaining)}
         </strong>
         <span>
-          {carryoverSongIds
+          {carriedPageSongIds
             ? L.progress.acheteLaChansonReserveeAvant
             : L.progress.leCarryoverViseLaSelection}
         </span>
@@ -250,7 +250,7 @@ export function ProgressPanel({
             <div>
               <p className="section-kicker">{L.progress.priorityDecision}</p>
               <h3>
-                {carryoverSongIds !== null
+                {carriedPageSongIds !== null
                   ? L.progress.selectionConservee
                   : workflowMode === "live"
                     ? L.progress.indiqueLesSongsVisibles
@@ -264,7 +264,7 @@ export function ProgressPanel({
             </span>
           </div>
 
-          {carryoverSongIds === null && (
+          {carriedPageSongIds === null && (
             <>
               <p className="selection-help">{L.progress.threeClicks}</p>
               <div className="offer-picker-grid">

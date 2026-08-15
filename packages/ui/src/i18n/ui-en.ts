@@ -360,12 +360,12 @@ export const UI_EN: Labels = {
     technique: "Technique",
     songSelectionLabel: "Song selection",
     acheteLaChansonReserveeAvant:
-      "Buy the reserved song before resuming techniques.",
+      "Choose and buy a song from the carried page before resuming techniques.",
     achetee: "Bought",
     alternativeSure: "Safe alternative",
     aucunCoutASaisirLe:
       "No cost to enter: the tracker only advances the pattern.",
-    carryoverAAcheter: "Carryover to buy",
+    carryoverAAcheter: "Carried page to resolve",
     choisirDansLesOptions: "Choose from the options",
     choisisLoptionReellementAchetee: "Pick the option you actually bought",
     choixVisible: "Visible choice",
@@ -383,8 +383,8 @@ export const UI_EN: Labels = {
     nonMesure: "Not measured",
     overridePushForce: "Override · forced push",
     concertPlayedTo: (concert: string) => `Concert played → ${concert}`,
-    pageSongsPorteeAutomatiquement: (song: string) =>
-      `Song page carried automatically · anchor ${song}`,
+    pageSongsPorteeAutomatiquement: (songs: string) =>
+      `Song page carried automatically · ${songs}`,
     patternJuniorNonEtabli: "Junior pattern not established",
     priorityDecision: "Priority decision",
     quandCeConcertEstJoue: "Once this concert is played, start the next phase.",

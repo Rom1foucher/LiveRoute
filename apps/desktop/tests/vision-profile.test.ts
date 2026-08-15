@@ -22,7 +22,7 @@ test("le profil public est identique au profil TypeScript canonique", () => {
 });
 
 test("le profil snapshot n'expose plus l'ancienne automatisation hybride", () => {
-  assert.equal(profile.schemaVersion, 5);
+  assert.equal(profile.schemaVersion, 6);
   assert.deepEqual(Object.keys(profile.capture), ["hotkey"]);
   assert.deepEqual(Object.keys(profile.automation), ["overlayEnabled"]);
   assert.deepEqual(Object.keys(profile.regions).sort(), [
@@ -30,6 +30,20 @@ test("le profil snapshot n'expose plus l'ancienne automatisation hybride", () =>
     "techniques",
     "tokens",
   ]);
+});
+
+test("un profil persisté à 250 migre vers le plafond Grand Live de 400", () => {
+  const normalized = normalizeVisionProfile({
+    ...DEFAULT_VISION_PROFILE,
+    schemaVersion: 5 as never,
+    ocr: {
+      ...DEFAULT_VISION_PROFILE.ocr,
+      maxTokenValue: 250,
+    },
+  });
+  assert.equal(normalized.schemaVersion, 6);
+  assert.equal(normalized.ocr.maxTokenValue, 400);
+  assert.ok(283 <= normalized.ocr.maxTokenValue);
 });
 
 test("le profil public expose toutes les zones snapshot nécessaires", () => {
@@ -98,7 +112,7 @@ test("le calibrage expose chaque région réellement consommée par l'OCR", () =
 test("les réglages numériques appris sont migrés et bornés", () => {
   const normalized = normalizeVisionProfile({
     ...DEFAULT_VISION_PROFILE,
-    schemaVersion: 5,
+    schemaVersion: 5 as never,
     // Deliberately partial: this is the legacy shape the migration must
     // complete, so it cannot satisfy the current type.
     numericFieldTuning: {

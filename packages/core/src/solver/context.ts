@@ -1,8 +1,6 @@
 import type { Song, UnlockPhase } from "../domain/song-data.ts";
 import type { TimingMode } from "../domain/live-rules.ts";
 import {
-  calculateTokenPressure,
-  calculateTokenReservePlan,
   contextualSongValues,
   estimateRemainingTrainingsByFacility,
   resolveEffectiveTechniqueObjective,
@@ -20,6 +18,7 @@ import {
   deriveStrategicPlan,
   isReserveTarget,
 } from "../planner/strategic-plan.ts";
+import { buildSharedResourceEconomy } from "./resource-economy.ts";
 
 export type SolverMode = "express" | "expert";
 
@@ -147,24 +146,23 @@ export const buildSolverStateContext = (input: SolverStateContextInput) => {
     // Locked future pools affect soft pressure/value, never the hard reserve.
     reserveSongIds: currentSongs.map((song) => song.id),
   };
-  const tokenPressure = calculateTokenPressure(
-    input.tokens,
-    allReserveSongs,
-    effectiveGenerationProfile,
-    strategicPlan,
+  const resourceEconomy = buildSharedResourceEconomy({
+    tokens: input.tokens,
+    currentSongs,
+    futureSongs,
+    laterSongs,
+    visibleSongIds: visibleSongs.map((song) => song.id),
+    plan: strategicPlan,
+    concertIndex: input.concertIndex,
+    timingMode: input.timingMode,
+    requiredPurchases:
+      input.timingMode === "deadline-now"
+        ? Math.max(0, strategicPlan.manualGaugeTarget - input.songsThisSection)
+        : 0,
+    generationProfile: effectiveGenerationProfile,
     reserveFeasibility,
-  );
-  const tokenReservePlan = calculateTokenReservePlan(
-    allReserveSongs,
-    strategicPlan,
-    {
-      tokens: input.tokens,
-      feasibility: reserveFeasibility,
-      shadowByKey: Object.fromEntries(
-        tokenPressure.map((pressure) => [pressure.key, pressure.shadowValue]),
-      ),
-    },
-  );
+  });
+  const { tokenPressure, tokenReservePlan } = resourceEconomy;
   const effectiveObjective = resolveEffectiveTechniqueObjective({
     solverMode: input.solverMode,
     analysisObjective: input.analysisObjective,
@@ -185,6 +183,8 @@ export const buildSolverStateContext = (input: SolverStateContextInput) => {
     reserveFeasibility,
     tokenPressure,
     tokenReservePlan,
+    resourceDemands: resourceEconomy.demands,
+    shadowPrices: resourceEconomy.shadowPrices,
     effectiveGenerationProfile,
     effectiveRiskProfile,
     effectiveObjective,

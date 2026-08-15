@@ -9,10 +9,7 @@ import {
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
 import type { SongDpTarget } from "./song-dp.ts";
-import {
-  compareTechniqueByContinuation,
-  evaluatePageCoverage,
-} from "./song-dp.ts";
+import { evaluatePageCoverage } from "./song-dp.ts";
 import { riskThreshold } from "./value.ts";
 
 const TOKEN_KEYS = ["dance", "passion", "vocal", "visual", "mental"] as const;
@@ -25,6 +22,8 @@ export type TechniqueDecisionCandidate<T = unknown> = {
   terminalDecisionVector?: readonly number[];
   payload: T;
 };
+
+type ImmediateTarget = SongDpTarget & { priority?: boolean };
 
 const canAfford = (tokens: Balance, cost: Balance): boolean =>
   TOKEN_KEYS.every((key) => tokens[key] >= cost[key]);
@@ -44,72 +43,131 @@ const subtract = (tokens: Balance, cost: Balance): Balance =>
 const quantized = (value: number, step: number): number =>
   Math.round(value / step);
 
-const compareQuantizedDescending = (
-  left: number,
-  right: number,
-  step: number,
-): number => quantized(right, step) - quantized(left, step);
+type TechniqueRankSnapshot = {
+  affordable: number;
+  nonBlocking: number;
+  riskClass: number;
+  terminalHard: readonly number[];
+  reserveBreach: number;
+  reserveDeficit: number;
+  terminalStructuralBands: readonly number[];
+  pageCoverage: readonly number[];
+  totalCostBand: number;
+  reserveDrainBand: number;
+  weightedDemandCostBand: number;
+  totalCost: number;
+  goalProbabilityBand: number;
+  reachProbabilityBand: number;
+  postPurchaseMargins: readonly number[];
+  terminalEconomyBands: readonly number[];
+  retainedTokensAfterPurchase: number;
+  costKey: string;
+};
 
-const compareTerminalHardPrefix = (
-  left: readonly number[] | undefined,
-  right: readonly number[] | undefined,
+const totalBalance = (balance: Balance): number =>
+  TOKEN_KEYS.reduce((sum, key) => sum + balance[key], 0);
+
+const costKey = (cost: Balance): string =>
+  TOKEN_KEYS.map((key) => String(cost[key]).padStart(6, "0")).join(",");
+
+const buildTechniqueRankSnapshot = <T>({
+  candidate,
+  tokens,
+  songs,
+  plan,
+  threshold,
+  tokenPressure,
+}: {
+  candidate: TechniqueDecisionCandidate<T>;
+  tokens: Balance;
+  songs: SongDpTarget[];
+  plan: StrategicPlan;
+  threshold: number;
+  tokenPressure: TokenPressure[];
+}): TechniqueRankSnapshot => {
+  const affordable = canAfford(tokens, candidate.cost);
+  const blocking =
+    immediateBlockingTargets({ tokens, cost: candidate.cost, songs, plan })
+      .length > 0;
+  const spend = techniqueSpendMetrics(candidate.cost, tokens, tokenPressure);
+  const after = affordable ? subtract(tokens, candidate.cost) : tokens;
+  const coverage = affordable
+    ? evaluatePageCoverage(after, songs, plan)
+    : evaluatePageCoverage(tokens, songs, plan);
+  const terminal = candidate.terminalDecisionVector;
+
+  return {
+    affordable: affordable ? 1 : 0,
+    nonBlocking: blocking ? 0 : 1,
+    // PR-4 terminal candidates already carry their own catastrophe-floor and
+    // net-value admission state. They must never be put back behind the generic
+    // Standard 92 % cliff merely because a sibling has no terminal vector.
+    riskClass:
+      terminal !== undefined || candidate.reachProbability >= threshold ? 1 : 0,
+    terminalHard: [
+      terminal?.[0] ?? 0,
+      terminal?.[1] ?? 0,
+      terminal?.[2] ?? 0,
+      terminal?.[3] ?? 0,
+    ],
+    reserveBreach: -spend.reserveBreachCount,
+    reserveDeficit: -spend.reserveDeficit,
+    terminalStructuralBands: [
+      quantized(terminal?.[4] ?? 0, 0.1),
+      quantized(terminal?.[5] ?? 0, 2.5),
+      quantized(terminal?.[6] ?? 0, 0.1),
+      quantized(terminal?.[7] ?? 0, 0.25),
+    ],
+    pageCoverage: [
+      quantized(coverage.planTargetProbability, 0.1),
+      coverage.affordablePlanTargetCount,
+      coverage.bestStructuralTier,
+      quantized(coverage.anyAffordableProbability, 0.1),
+      coverage.affordableCount,
+    ],
+    // A 1-token raw difference is not enough to spend a visibly tense colour,
+    // while 15 vs 24 remains a material cost difference.
+    totalCostBand: -quantized(spend.totalSpend, 5),
+    // Surplus is deterministic but also banded: only a material reserve-drain
+    // difference outranks the generation-profile shadow signal.
+    reserveDrainBand: -quantized(spend.normalizedReserveDrain, 0.1),
+    weightedDemandCostBand: -quantized(spend.weightedDemandCost, 1),
+    totalCost: -spend.totalSpend,
+    goalProbabilityBand: quantized(candidate.goalProbability, 0.05),
+    reachProbabilityBand: quantized(candidate.reachProbability, 0.05),
+    postPurchaseMargins: [
+      spend.minimumPostPurchaseMargin,
+      spend.retainedPostPurchaseMargin,
+    ],
+    terminalEconomyBands: [
+      quantized(terminal?.[8] ?? 0, 5),
+      quantized(terminal?.[9] ?? 0, 5),
+    ],
+    retainedTokensAfterPurchase: affordable ? totalBalance(after) : -Infinity,
+    costKey: costKey(candidate.cost),
+  };
+};
+
+const compareDescending = (left: number, right: number): number => {
+  if (Object.is(left, right)) return 0;
+  if (!Number.isFinite(left) || !Number.isFinite(right)) {
+    return left > right ? -1 : 1;
+  }
+  const delta = right - left;
+  return Math.abs(delta) <= 1e-9 ? 0 : delta;
+};
+
+const compareDescendingVector = (
+  left: readonly number[],
+  right: readonly number[],
 ): number => {
-  for (let index = 0; index < 4; index += 1) {
-    const delta = (right?.[index] ?? 0) - (left?.[index] ?? 0);
-    if (Math.abs(delta) > 1e-9) return delta;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const compared = compareDescending(left[index] ?? 0, right[index] ?? 0);
+    if (compared !== 0) return compared;
   }
   return 0;
 };
-
-const compareTerminalStochasticBands = (
-  left: readonly number[] | undefined,
-  right: readonly number[] | undefined,
-): number =>
-  // Future F+10 / target probabilities: only a ~10-point band change is
-  // material enough to outrank deterministic spending safety.
-  compareQuantizedDescending(left?.[4] ?? 0, right?.[4] ?? 0, 0.1) ||
-  // Expected Friendship bonus is much less noisy in absolute points.
-  compareQuantizedDescending(left?.[5] ?? 0, right?.[5] ?? 0, 2.5) ||
-  compareQuantizedDescending(left?.[6] ?? 0, right?.[6] ?? 0, 0.1) ||
-  compareQuantizedDescending(left?.[7] ?? 0, right?.[7] ?? 0, 0.25);
-
-const compareTerminalEconomicBands = (
-  left: readonly number[] | undefined,
-  right: readonly number[] | undefined,
-): number =>
-  // Index 8 is -expected committed cost (higher is better), index 9 retained
-  // tokens. Five-token buckets avoid ranking on sampling decimals.
-  compareQuantizedDescending(left?.[8] ?? 0, right?.[8] ?? 0, 5) ||
-  compareQuantizedDescending(left?.[9] ?? 0, right?.[9] ?? 0, 5);
-
-const compareContinuationBands = (
-  leftCost: Balance,
-  rightCost: Balance,
-  tokens: Balance,
-  songs: SongDpTarget[],
-  plan: StrategicPlan,
-): number => {
-  if (!canAfford(tokens, leftCost) || !canAfford(tokens, rightCost)) return 0;
-  const left = evaluatePageCoverage(subtract(tokens, leftCost), songs, plan);
-  const right = evaluatePageCoverage(subtract(tokens, rightCost), songs, plan);
-  return (
-    compareQuantizedDescending(
-      left.planTargetProbability,
-      right.planTargetProbability,
-      0.1,
-    ) ||
-    right.affordablePlanTargetCount - left.affordablePlanTargetCount ||
-    right.bestStructuralTier - left.bestStructuralTier ||
-    compareQuantizedDescending(
-      left.anyAffordableProbability,
-      right.anyAffordableProbability,
-      0.1,
-    ) ||
-    right.affordableCount - left.affordableCount
-  );
-};
-
-type ImmediateTarget = SongDpTarget & { priority?: boolean };
 
 /**
  * If two visible lessons consume exactly the same colours, the component-wise
@@ -175,10 +233,10 @@ export const immediateBlockingTargets = ({
 };
 
 /**
- * Orders an observed offer by hard affordability, declared risk threshold,
- * vector continuation and conditional shop probabilities. Once those are
- * equivalent, the shared reserve-aware spending comparator runs before raw
- * token retention. There is no headroom bonus and no risk penalty multiplier.
+ * PR-7 turns the observed-technique ranking into a real total order. Same-
+ * support dominance is handled as a Pareto prefilter; survivors are then
+ * compared by an immutable lexicographic key. No pairwise criterion can
+ * short-circuit a later global criterion and create A>B>C>A cycles.
  */
 export type TechniqueRankReason =
   | "affordability"
@@ -200,148 +258,114 @@ export type TechniqueRankReason =
   | "continuation-fallback"
   | "stable-id";
 
-const compareObservedTechniquePair = <T>({
-  left,
-  right,
-  tokens,
-  songs,
-  plan,
-  threshold,
-  tokenPressure,
-}: {
-  left: TechniqueDecisionCandidate<T>;
-  right: TechniqueDecisionCandidate<T>;
-  tokens: Balance;
-  songs: SongDpTarget[];
-  plan: StrategicPlan;
-  threshold: number;
-  tokenPressure: TokenPressure[];
-}): { order: number; reason: TechniqueRankReason } => {
-  const leftAffordable = canAfford(tokens, left.cost);
-  const rightAffordable = canAfford(tokens, right.cost);
-  if (leftAffordable !== rightAffordable) {
-    return { order: leftAffordable ? -1 : 1, reason: "affordability" };
+const compareTechniqueRankSnapshots = (
+  left: TechniqueRankSnapshot,
+  right: TechniqueRankSnapshot,
+): { order: number; reason: TechniqueRankReason } => {
+  const criteria: Array<[TechniqueRankReason, number]> = [
+    ["affordability", compareDescending(left.affordable, right.affordable)],
+    [
+      "immediate-strategic-block",
+      compareDescending(left.nonBlocking, right.nonBlocking),
+    ],
+    ["risk-class", compareDescending(left.riskClass, right.riskClass)],
+    [
+      "terminal-hard-state",
+      compareDescendingVector(left.terminalHard, right.terminalHard),
+    ],
+    [
+      "reserve-breach",
+      compareDescending(left.reserveBreach, right.reserveBreach),
+    ],
+    [
+      "reserve-deficit",
+      compareDescending(left.reserveDeficit, right.reserveDeficit),
+    ],
+    [
+      "terminal-structural-band",
+      compareDescendingVector(
+        left.terminalStructuralBands,
+        right.terminalStructuralBands,
+      ),
+    ],
+    [
+      "page-coverage",
+      compareDescendingVector(left.pageCoverage, right.pageCoverage),
+    ],
+    ["total-cost", compareDescending(left.totalCostBand, right.totalCostBand)],
+    // Once hard reserves are safe and raw costs are materially equivalent,
+    // prefer the genuinely overflowing colour before micro shadow differences.
+    [
+      "reserve-drain",
+      compareDescending(left.reserveDrainBand, right.reserveDrainBand),
+    ],
+    [
+      "weighted-demand-cost",
+      compareDescending(
+        left.weightedDemandCostBand,
+        right.weightedDemandCostBand,
+      ),
+    ],
+    [
+      "post-purchase-margin",
+      compareDescendingVector(
+        left.postPurchaseMargins,
+        right.postPurchaseMargins,
+      ),
+    ],
+    // Exact cost is a final deterministic tie-break inside the same 5-token band.
+    ["total-cost", compareDescending(left.totalCost, right.totalCost)],
+    [
+      "goal-probability-band",
+      compareDescending(left.goalProbabilityBand, right.goalProbabilityBand),
+    ],
+    [
+      "reach-probability-band",
+      compareDescending(left.reachProbabilityBand, right.reachProbabilityBand),
+    ],
+    [
+      "terminal-economy",
+      compareDescendingVector(
+        left.terminalEconomyBands,
+        right.terminalEconomyBands,
+      ),
+    ],
+    [
+      "continuation-fallback",
+      compareDescending(
+        left.retainedTokensAfterPurchase,
+        right.retainedTokensAfterPurchase,
+      ),
+    ],
+  ];
+  for (const [reason, order] of criteria) {
+    if (order !== 0) return { order, reason };
   }
-
-  const leftBlocking =
-    immediateBlockingTargets({ tokens, cost: left.cost, songs, plan }).length >
-    0;
-  const rightBlocking =
-    immediateBlockingTargets({ tokens, cost: right.cost, songs, plan }).length >
-    0;
-  if (leftBlocking !== rightBlocking) {
-    return {
-      order: leftBlocking ? 1 : -1,
-      reason: "immediate-strategic-block",
-    };
+  const costOrder = left.costKey.localeCompare(right.costKey);
+  if (costOrder !== 0) {
+    return { order: costOrder, reason: "continuation-fallback" };
   }
+  return { order: 0, reason: "stable-id" };
+};
 
-  const sameSupport = compareSameTokenSupportDominance(left.cost, right.cost);
-  if (sameSupport !== 0) {
-    return { order: sameSupport, reason: "same-colour-dominance" };
-  }
-
-  const leftAdmissible = left.reachProbability >= threshold;
-  const rightAdmissible = right.reachProbability >= threshold;
-  if (leftAdmissible !== rightAdmissible) {
-    return { order: leftAdmissible ? -1 : 1, reason: "risk-class" };
-  }
-
-  const terminalHard = compareTerminalHardPrefix(
-    left.terminalDecisionVector,
-    right.terminalDecisionVector,
+const paretoDominator = <T>(
+  candidate: TechniqueDecisionCandidate<T>,
+  candidates: readonly TechniqueDecisionCandidate<T>[],
+): TechniqueDecisionCandidate<T> | null => {
+  const dominators = candidates.filter(
+    (other) =>
+      other !== candidate &&
+      compareSameTokenSupportDominance(other.cost, candidate.cost) < 0,
   );
-  if (terminalHard !== 0) {
-    return { order: terminalHard, reason: "terminal-hard-state" };
-  }
-
-  const leftSpend = techniqueSpendMetrics(left.cost, tokens, tokenPressure);
-  const rightSpend = techniqueSpendMetrics(right.cost, tokens, tokenPressure);
-  const reserveBreach =
-    leftSpend.reserveBreachCount - rightSpend.reserveBreachCount;
-  if (reserveBreach !== 0) {
-    return { order: reserveBreach, reason: "reserve-breach" };
-  }
-  const reserveDeficit = leftSpend.reserveDeficit - rightSpend.reserveDeficit;
-  if (reserveDeficit !== 0) {
-    return { order: reserveDeficit, reason: "reserve-deficit" };
-  }
-
-  const structuralBand = compareTerminalStochasticBands(
-    left.terminalDecisionVector,
-    right.terminalDecisionVector,
+  if (dominators.length === 0) return null;
+  return (
+    [...dominators].sort(
+      (left, right) =>
+        totalBalance(left.cost) - totalBalance(right.cost) ||
+        costKey(left.cost).localeCompare(costKey(right.cost)) ||
+        left.id.localeCompare(right.id),
+    )[0] ?? null
   );
-  if (structuralBand !== 0) {
-    return { order: structuralBand, reason: "terminal-structural-band" };
-  }
-
-  const coverage = compareContinuationBands(
-    left.cost,
-    right.cost,
-    tokens,
-    songs,
-    plan,
-  );
-  if (coverage !== 0) return { order: coverage, reason: "page-coverage" };
-
-  // Once mechanical/structural classes are equivalent, token shadow prices
-  // outrank sampling-scale goal/reach decimals.
-  const weightedDemand =
-    leftSpend.weightedDemandCost - rightSpend.weightedDemandCost;
-  if (Math.abs(weightedDemand) > 1e-9) {
-    return { order: weightedDemand, reason: "weighted-demand-cost" };
-  }
-  const totalSpend = leftSpend.totalSpend - rightSpend.totalSpend;
-  if (totalSpend !== 0) return { order: totalSpend, reason: "total-cost" };
-  const reserveDrain =
-    leftSpend.normalizedReserveDrain - rightSpend.normalizedReserveDrain;
-  if (Math.abs(reserveDrain) > 1e-9) {
-    return { order: reserveDrain, reason: "reserve-drain" };
-  }
-
-  const goalBand = compareQuantizedDescending(
-    left.goalProbability,
-    right.goalProbability,
-    0.05,
-  );
-  if (goalBand !== 0) {
-    return { order: goalBand, reason: "goal-probability-band" };
-  }
-  const reachBand = compareQuantizedDescending(
-    left.reachProbability,
-    right.reachProbability,
-    0.05,
-  );
-  if (reachBand !== 0) {
-    return { order: reachBand, reason: "reach-probability-band" };
-  }
-
-  const margin =
-    rightSpend.minimumPostPurchaseMargin -
-      leftSpend.minimumPostPurchaseMargin ||
-    rightSpend.retainedPostPurchaseMargin -
-      leftSpend.retainedPostPurchaseMargin;
-  if (margin !== 0) return { order: margin, reason: "post-purchase-margin" };
-
-  const terminalEconomy = compareTerminalEconomicBands(
-    left.terminalDecisionVector,
-    right.terminalDecisionVector,
-  );
-  if (terminalEconomy !== 0) {
-    return { order: terminalEconomy, reason: "terminal-economy" };
-  }
-
-  const fallback = compareTechniqueByContinuation(
-    left.cost,
-    right.cost,
-    tokens,
-    songs,
-    plan,
-  );
-  if (fallback !== 0) {
-    return { order: fallback, reason: "continuation-fallback" };
-  }
-  return { order: left.id.localeCompare(right.id), reason: "stable-id" };
 };
 
 export type RankedTechniqueDecisionCandidate<T = unknown> =
@@ -363,31 +387,54 @@ export const rankObservedTechniques = <T>({
   tokenPressure: TokenPressure[];
 }): RankedTechniqueDecisionCandidate<T>[] => {
   const threshold = riskThreshold(riskProfile);
-  const sorted = [...candidates].sort(
-    (left, right) =>
-      compareObservedTechniquePair({
-        left,
-        right,
+  const snapshots = new Map(
+    candidates.map((candidate) => [
+      candidate,
+      buildTechniqueRankSnapshot({
+        candidate,
         tokens,
         songs,
         plan,
         threshold,
         tokenPressure,
-      }).order,
+      }),
+    ]),
   );
+  const dominatedBy = new Map<
+    TechniqueDecisionCandidate<T>,
+    TechniqueDecisionCandidate<T>
+  >();
+  for (const candidate of candidates) {
+    const dominator = paretoDominator(candidate, candidates);
+    if (dominator) dominatedBy.set(candidate, dominator);
+  }
+
+  const sorted = [...candidates].sort((left, right) => {
+    const leftDominated = dominatedBy.has(left);
+    const rightDominated = dominatedBy.has(right);
+    if (leftDominated !== rightDominated) return leftDominated ? 1 : -1;
+    const compared = compareTechniqueRankSnapshots(
+      snapshots.get(left)!,
+      snapshots.get(right)!,
+    ).order;
+    return compared || left.id.localeCompare(right.id);
+  });
+
   return sorted.map((candidate, index) => {
+    if (dominatedBy.has(candidate)) {
+      return { ...candidate, rankReason: "same-colour-dominance" };
+    }
     const reference = index === 0 ? sorted[1] : sorted[0];
-    const rankReason = reference
-      ? compareObservedTechniquePair({
-          left: index === 0 ? candidate : reference,
-          right: index === 0 ? reference : candidate,
-          tokens,
-          songs,
-          plan,
-          threshold,
-          tokenPressure,
-        }).reason
-      : "stable-id";
-    return { ...candidate, rankReason };
+    if (!reference) {
+      return { ...candidate, rankReason: "stable-id" };
+    }
+    if (index === 0 && dominatedBy.has(reference)) {
+      return { ...candidate, rankReason: "same-colour-dominance" };
+    }
+    const compared = compareTechniqueRankSnapshots(
+      snapshots.get(index === 0 ? candidate : reference)!,
+      snapshots.get(index === 0 ? reference : candidate)!,
+    );
+    return { ...candidate, rankReason: compared.reason };
   });
 };

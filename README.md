@@ -59,18 +59,19 @@ npm ci
 # Browser edition
 npm run dev:web
 
-# Desktop edition
-npm run prepare:ocr
+# Desktop edition (prepares its local OCR assets automatically)
 npm run dev:desktop
 ```
 
-`npm run prepare:ocr` creates approximately 23 MB of generated OCR resources
-under `apps/desktop/public/ocr/`. The directory is intentionally ignored by
-Git.
+Desktop `dev` and `build` run `prepare:ocr` themselves. `npm run prepare:ocr`
+remains available as an explicit validation/debug step and creates approximately
+23 MB of generated resources under `apps/desktop/public/ocr/`. The directory is
+intentionally ignored by Git.
 
 ## Validation
 
 ```bash
+npm run check:versions
 npm run format:check
 npm run typecheck
 npm test
@@ -79,10 +80,11 @@ npm run build --workspace @glcp/desktop
 npm run build:desktop
 ```
 
-The v1.0.1 baseline contains **271 tests**: 186 core, 19 shared UI, and 66
-desktop/OCR tests. The browser and desktop frontends are validated locally;
-the native Tauri build and Windows NSIS installer are validated by the Windows
-workflow.
+The current post-audit source baseline contains **332 tests**: 236 core, 19
+shared UI, and 77 desktop/OCR tests. The historical v1.0.0/v1.0.1 counts remain
+recorded in the release notes. Full release validation still requires a clean
+`npm ci`, strict TypeScript, both frontend builds, and the Windows native/NSIS
+workflow described in `docs/VALIDATION.md`.
 
 ## GitHub distribution
 
@@ -90,18 +92,19 @@ The repository includes three workflows:
 
 - `.github/workflows/ci.yml` runs formatting, strict TypeScript checks, tests,
   and the browser build on pushes and pull requests;
-- `.github/workflows/deploy-pages.yml` deploys `main` to GitHub Pages and
-  automatically selects the correct root or project-site base path;
+- `.github/workflows/deploy-pages.yml` deploys `main` to the verified custom
+  domain `liveroute.tmoperao.fr` with Vite base `/`; the Vite configuration
+  still accepts `VITE_BASE_PATH` for repository-site validation or forks;
 - `.github/workflows/build-windows.yml` validates a Windows build on demand and
   publishes the NSIS installer when a `v*` tag is pushed.
 
-Enable **Settings → Pages → Source → GitHub Actions** after the first push. To
-publish the v1.0.1 hotfix:
-
-```bash
-git tag v1.0.1
-git push origin v1.0.1
-```
+The upstream repository already uses **Settings → Pages → Source → GitHub
+Actions**. A new fork/repository must enable that once before `configure-pages`
+can deploy. `npm run check:versions` prevents the Web/Desktop/Tauri version
+labels from drifting even though solver policy telemetry (`grand-live-v6`) is
+versioned independently from application SemVer. Release tags should only be
+created after the clean-install gate in `docs/VALIDATION.md` passes for the
+exact commit being tagged.
 
 ## Documentation
 
@@ -111,7 +114,8 @@ git push origin v1.0.1
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)           | Package boundaries and platform responsibilities    |
 | [`docs/ALGORITHMIC_MODEL.md`](docs/ALGORITHMIC_MODEL.md) | Current decision model and invariants               |
 | [`docs/VISION_PROFILE.md`](docs/VISION_PROFILE.md)       | OCR profile schema and calibration                  |
-| [`docs/VALIDATION.md`](docs/VALIDATION.md)               | V1 release validation protocol                      |
+| [`docs/VALIDATION.md`](docs/VALIDATION.md)               | Current release validation protocol                 |
+| [`audit closure`](docs/AUDIT_CLOSURE_2026-08-13.md)      | PR-0 through PR-7 audit closure and evidence gaps   |
 | [`RELEASE_NOTES.md`](RELEASE_NOTES.md)                   | User-facing release history                         |
 | [`docs/archive/`](docs/archive)                          | Historical audits, specifications, and pre-V1 notes |
 

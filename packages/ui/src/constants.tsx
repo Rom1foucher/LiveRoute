@@ -9,7 +9,9 @@ import type {
   TechniqueQuickKind,
   TokenKey,
   TokenPressure,
+  HuntState,
 } from "@glcp/core";
+import { TOKEN_KEYS } from "@glcp/core";
 import type { TimingMode } from "@glcp/core";
 import type { RunPulseEvent } from "@glcp/core";
 import type { SongPolicyAction } from "@glcp/core";
@@ -46,12 +48,13 @@ export type LiveSnapshot = {
   ownedSongs: string[];
   activeSongIds: string[];
   visibleSongIds: string[];
-  carryoverSongIds: string[] | null;
+  carriedPageSongIds: string[] | null;
   tokens: Balance;
   runPulseEvents: RunPulseEvent[];
   runPulseStartedAtConcert: number | null;
   timingMode: TimingMode;
   abandonedChaseTargetIds: string[];
+  huntState: HuntState | null;
 };
 
 export type OptionAnalysis = {
@@ -261,9 +264,10 @@ export const signatureOf = (
   generationProfile: GenerationProfile,
   timingMode: TimingMode,
   abandonedChaseTargetIds: string[],
+  huntState: HuntState | null,
   ownedSongIds: string[],
   activeSongIds: string[],
-  carryoverSongIds: string[] | null,
+  carriedPageSongIds: string[] | null,
 ) =>
   JSON.stringify({
     concertIndex,
@@ -281,7 +285,18 @@ export const signatureOf = (
     generationProfile,
     timingMode,
     abandonedChaseTargetIds: [...abandonedChaseTargetIds].sort(),
+    huntState: huntState
+      ? {
+          ...huntState,
+          targetIds: [...huntState.targetIds].sort(),
+          committedTechniqueCost: TOKEN_KEYS.map(
+            (key) => huntState.committedTechniqueCost[key],
+          ),
+        }
+      : null,
     ownedSongIds: [...ownedSongIds].sort(),
     activeSongIds: [...activeSongIds].sort(),
-    carryoverSongIds: carryoverSongIds ? [...carryoverSongIds].sort() : null,
+    carriedPageSongIds: carriedPageSongIds
+      ? [...carriedPageSongIds].sort()
+      : null,
   });

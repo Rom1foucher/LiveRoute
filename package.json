@@ -13,6 +13,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:versions": "node scripts/check-version-consistency.mjs",
     "dev:web": "npm run dev --workspace @glcp/web",
     "dev:desktop": "npm run desktop --workspace @glcp/desktop",
     "build:web": "npm run build --workspace @glcp/web",

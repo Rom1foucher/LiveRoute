@@ -70,7 +70,7 @@ export type NumericFieldTuning = {
 };
 
 export type VisionProfile = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   id: string;
   name: string;
   windowTitlePattern: string;

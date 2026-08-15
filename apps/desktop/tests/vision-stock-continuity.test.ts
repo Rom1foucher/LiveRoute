@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Balance } from "@glcp/core";
-import { assessStockContinuity } from "../src/vision/stock-continuity.ts";
+import {
+  assessStockContinuity,
+  stockContinuityRequiresConfirmation,
+} from "../src/vision/stock-continuity.ts";
 
 const balance = (
   dance: number,
@@ -69,4 +72,32 @@ test("plusieurs ruptures simultanées sont présentées comme dérive globale po
   assert.ok(result);
   assert.equal(result.broadStateDrift, true);
   assert.equal(result.issues.length, 5);
+});
+
+test("263 vers 6 bloque l'application automatique jusqu'à confirmation", () => {
+  const result = assessStockContinuity(
+    balance(263, 104, 107, 137, 142),
+    balance(6, 104, 107, 137, 142),
+  );
+  assert.ok(result);
+  assert.ok(
+    ["probable-truncation", "abrupt-drop"].includes(
+      result.issues[0]?.kind ?? "",
+    ),
+  );
+  assert.equal(stockContinuityRequiresConfirmation(result), true);
+});
+
+test("une dérive globale multi-couleurs reste une revue non bloquante", () => {
+  const result = assessStockContinuity(
+    balance(128, 103, 97, 88, 91),
+    balance(8, 3, 7, 8, 1),
+  );
+  assert.ok(result);
+  assert.equal(result.broadStateDrift, true);
+  assert.equal(stockContinuityRequiresConfirmation(result), false);
+});
+
+test("l'absence d'écart ne requiert jamais de confirmation", () => {
+  assert.equal(stockContinuityRequiresConfirmation(null), false);
 });

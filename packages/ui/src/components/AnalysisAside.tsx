@@ -598,7 +598,11 @@ export function AnalysisAside({
                       displayedSongPolicy.nextSectionReadiness
                         .expectedFriendshipBonus * 10,
                     ) / 10}
-                    %
+                    % · exp.{" "}
+                    {Math.round(
+                      displayedSongPolicy.nextSectionReadiness
+                        .expectedFriendshipTrainingExposure * 10,
+                    ) / 10}
                   </strong>
                 </div>
               </>

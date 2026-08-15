@@ -47,6 +47,18 @@ export type Message =
   | { code: "reason.huntAbandonTechniqueCount"; techniques: number }
   | { code: "reason.huntAbandonBelowFloor"; probability: number; floor: number }
   | { code: "reason.huntContinuationRefused"; cause: Message }
+  | {
+      code: "reason.huntAbandonMarginalValue";
+      probability: number;
+      netValue: number;
+      pages: number;
+    }
+  | {
+      code: "reason.huntContinueMarginalValue";
+      probability: number;
+      netValue: number;
+      pages: number;
+    }
   | { code: "reason.securesGreatSuccess" }
   | {
       code: "reason.nextSectionCheckpoint";
@@ -57,6 +69,9 @@ export type Message =
   | {
       code: "reason.nextSectionValue";
       friendshipBonus: number;
+      friendshipTrainingExposure: number;
+      spTrainingExposure: number;
+      practiceTrainingExposure: number;
       lessonSkillPoints: number;
       horizonSections: number;
     }
@@ -75,6 +90,9 @@ export type Message =
   | {
       code: "reason.carryNextSectionValue";
       friendshipBonus: number;
+      friendshipTrainingExposure: number;
+      spTrainingExposure: number;
+      practiceTrainingExposure: number;
       lessonSkillPoints: number;
     }
   | { code: "reason.carriedSongLessonSkillPoints"; points: number }
@@ -91,6 +109,7 @@ export type Message =
   | {
       code: "reason.stopNextSectionFriendship";
       friendshipBonus: number;
+      friendshipTrainingExposure: number;
       horizonSections: number;
     }
   | { code: "reason.greatSuccessSecured" }
@@ -137,6 +156,33 @@ export type Message =
   | { code: "terminal.exposeAndCarry"; gain: Message }
   | { code: "terminal.stopNowPageNotReached" }
   | { code: "terminal.stopNow"; gain: Message }
+  | {
+      code: "terminal.exposeAndCarryValue";
+      grossValue: number;
+      opportunityCost: number;
+      riskPenalty: number;
+      netValue: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
+  | {
+      code: "terminal.stopNowValue";
+      grossValue: number;
+      opportunityCost: number;
+      riskPenalty: number;
+      netValue: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
+  | {
+      code: "terminal.stopNowCatastropheFloor";
+      grossValue: number;
+      opportunityCost: number;
+      riskPenalty: number;
+      netValue: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
 
   // ── Token reserve explanation (v0.24 feasibility scale) ──────────────────
   | { code: "reserve.noNearbyTarget" }

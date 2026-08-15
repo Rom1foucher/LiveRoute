@@ -70,7 +70,7 @@ export const normalizeVisionProfile = (
   const hasLegacyNumericLearning =
     sourceSchemaVersion > 0 && sourceSchemaVersion < 5;
 
-  next.schemaVersion = 5;
+  next.schemaVersion = 6;
   next.id = typeof value.id === "string" ? value.id : fallback.id;
   next.name = typeof value.name === "string" ? value.name : fallback.name;
   next.windowTitlePattern =
@@ -110,7 +110,10 @@ export const normalizeVisionProfile = (
   next.ocr.maxTokenValue = Math.round(
     clamp(
       finite(value.ocr?.maxTokenValue, fallback.ocr.maxTokenValue),
-      20,
+      // Grand Live reaches a 400-token cap. Persisted profiles from older
+      // builds sometimes kept 250 here, which rejected both OCR and numeric
+      // calibration values such as 263/283. Never migrate below scenario cap.
+      fallback.ocr.maxTokenValue,
       999,
     ),
   );

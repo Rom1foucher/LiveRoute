@@ -60,7 +60,7 @@ export type RunView = {
   manualGaugeTarget: number;
   ownedSongs: Set<string>;
   visibleSongIds: Set<string>;
-  carryoverSongIds: string[] | null;
+  carriedPageSongIds: string[] | null;
   availableSongs: Song[];
   selectionSongs: Song[];
   songTargets: SongTarget[];

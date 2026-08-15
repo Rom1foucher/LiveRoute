@@ -221,3 +221,55 @@ test("la fermeture C2 valorise C4 après deux transitions coûtées", () => {
   assert.ok(result.expectedFriendshipBonus > 39.5);
   assert.ok(result.expectedLessonSkillPoints >= 190);
 });
+
+test("PR-1 : une page portée connue ne peut plus être remplacée par un tirage fictif", () => {
+  const carriedPage = [
+    song("carry-a", { dance: 21 }, ["filler"]),
+    song("carry-b", { passion: 21 }, ["filler"]),
+    song("carry-c", { vocal: 21 }, ["filler"]),
+  ];
+  const sp3 = song("future-sp3", { visual: 21, mental: 21 }, ["sp3-target"]);
+  const result = evaluateCrossSectionReadiness({
+    completedConcertIndex: 1,
+    currentPeriod: "classic",
+    // Even after the verified +10, none of the three known fillers is
+    // affordable. The simulator must therefore remain on this exact page; it
+    // cannot skip it and draw the hidden SP+3 for free.
+    balanceBeforeLive: balance(),
+    currentPool: carriedPage,
+    futureSongs: [sp3],
+    carriedPage,
+    totalSongsBeforeNextSection: 8,
+    trials: 64,
+    seedKey: "known-page-no-redraw",
+  });
+
+  assert.ok(result);
+  assert.equal(result.targetProbability, 0);
+  assert.equal(result.expectedPurchases, 0);
+  assert.equal(result.expectedTechniquePurchases, 0);
+});
+
+test("PR-1 : la page portée est réévaluée après le crédit +10", () => {
+  const sp3 = song("carried-sp3", { dance: 21 }, ["sp3-target"]);
+  const carriedPage = [
+    sp3,
+    song("carry-filler-a", { passion: 21 }, ["filler"]),
+    song("carry-filler-b", { vocal: 21 }, ["filler"]),
+  ];
+  const result = evaluateCrossSectionReadiness({
+    completedConcertIndex: 1,
+    currentPeriod: "classic",
+    balanceBeforeLive: balance({ dance: 15 }),
+    currentPool: carriedPage,
+    carriedPage,
+    totalSongsBeforeNextSection: 8,
+    trials: 32,
+    seedKey: "carry-credit-re-evaluate",
+  });
+
+  assert.ok(result);
+  assert.equal(result.targetProbability, 1);
+  assert.equal(result.expectedPurchases, 1);
+  assert.equal(result.expectedTechniquePurchases, 0);
+});
