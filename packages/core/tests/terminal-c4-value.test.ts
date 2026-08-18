@@ -67,7 +67,7 @@ test("PR-4 : le seuil Standard 92 % n'est plus un cliff binaire en C4", () => {
   assert.ok(above.netValue > below.netValue);
 });
 
-test("C4 opportunity economy : détruire une option future peut faire perdre une branche à gain identique", () => {
+test("C4 value : un coût d'opportunité réellement fourni reste pris en compte", () => {
   const cheap = evaluate({ opportunityCost: 25 });
   const expensive = evaluate({ opportunityCost: 80 });
 
@@ -117,7 +117,6 @@ test("C4 opportunity economy : les coefficients restent explicites et auditables
   assert.ok(TERMINAL_C4_VALUE_CALIBRATION.friendshipTrainingExposure > 0);
   assert.ok(TERMINAL_C4_VALUE_CALIBRATION.spTrainingExposure > 0);
   assert.ok(TERMINAL_C4_VALUE_CALIBRATION.practiceTrainingExposure > 0);
-  assert.ok(TERMINAL_C4_VALUE_CALIBRATION.gate18CapacityLoss > 0);
 });
 
 test("C4 opportunity economy : aucun PUSH n'est justifié avec un gain effectif nul", () => {
@@ -138,7 +137,7 @@ test("C4 opportunity economy : aucun PUSH n'est justifié avec un gain effectif 
   assert.equal(result.netValue, 0);
 });
 
-test("C4 replay 2026-08-13 : le premier cycle ne détruit aucune option Friendship ni fermeture 18", () => {
+test("C4 hidden options : STOP ne reçoit ni crédit Friendship caché ni crédit de fermeture 18", () => {
   const remaining = [
     "yumezora",
     "present-march",
@@ -187,4 +186,37 @@ test("C4 replay 2026-08-13 : le premier cycle ne détruit aucune option Friendsh
   assert.equal(decision.opportunityCost, 0);
   assert.ok(decision.grossValue > 30);
   assert.ok(decision.netValue > 30);
+});
+
+test("C4 replay 2026-08-17 : le faux knapsack Friendship reste neutralisé même avec un wallet serré", () => {
+  const remaining = [
+    "yumezora",
+    "present-march",
+    "sekai",
+    "harusora",
+  ].map(songTarget);
+  const opportunity = evaluateTerminalC4OpportunityCost({
+    beforeBalance: balance({
+      dance: 41,
+      passion: 51,
+      vocal: 51,
+      visual: 45,
+      mental: 72,
+    }),
+    afterBalance: balance({
+      dance: 17,
+      passion: 27,
+      vocal: 27,
+      visual: 21,
+      mental: 48,
+    }),
+    remainingSongs: remaining,
+    totalSongsAfterAction: 14,
+  });
+
+  assert.deepEqual(opportunity, {
+    friendshipOptionLoss: 0,
+    gate18CapacityLoss: 0,
+    opportunityCost: 0,
+  });
 });

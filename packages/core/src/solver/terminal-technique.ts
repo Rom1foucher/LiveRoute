@@ -8,7 +8,6 @@ import {
   subtractCost,
   techniqueSpendMetrics,
   totalCost,
-  TOKEN_KEYS,
   type Balance,
   type GenerationProfile,
   type Period,
@@ -19,18 +18,22 @@ import {
   type TokenPressure,
 } from "../live-model.ts";
 import {
+  deriveStrategicPlan,
   isChaseTarget,
   structuralTier,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
-import { applyPromotionalLiveTransition } from "../domain/live-rules.ts";
+import { techniquesForSongCycle } from "../domain/live-rules.ts";
 import { enumeratePageActions } from "./page-actions.ts";
-import { maximumAffordablePurchases } from "./song-dp.ts";
 import {
   simulateCrossSectionReadinessTrial,
   type CrossSectionTrialResult,
 } from "./cross-section.ts";
-import { drawTransitionSongPage } from "./song-transition.ts";
+import {
+  drawTransitionSongPage,
+  simulateTransitionAwareSongPagesTrial,
+  type TransitionAwareTrialResult,
+} from "./song-transition.ts";
 import { riskCatastropheFloor, riskThreshold } from "./value.ts";
 import {
   addPairedDifference,
@@ -65,6 +68,8 @@ export type TerminalTechniqueOptionsInput = {
   currentSongs: SongTarget[];
   futureSongs?: SongTarget[];
   totalSongs: number;
+  /** Manual songs already purchased in the section being closed. */
+  songsThisSection?: number;
   plan: StrategicPlan;
   riskProfile?: RiskProfile;
   generationProfile?: GenerationProfile;
@@ -318,10 +323,6 @@ export const TERMINAL_C4_VALUE_CALIBRATION = {
   // current search cycle. Keep this small and fixed; resource destruction is
   // already priced separately by opportunity cost.
   failedSearchPenalty: 2,
-  // Losing one currently fundable purchase on the path to 18 is valued on
-  // the same structural scale as a target-probability point. This is a guard
-  // against spending away a closure option, not a bonus for raw song count.
-  gate18CapacityLoss: 18,
   riskPenaltyMultiplier: {
     safe: 3,
     standard: 2,
@@ -337,7 +338,7 @@ export type TerminalC4ValueBreakdown = {
   grossValue: number;
   /** Raw PR-5 spend telemetry; no longer subtracted directly in C4. */
   weightedCommittedCost: number;
-  /** Loss of future C4 Friendship / secured 18-song buying options. */
+  /** Action-aware downstream loss. Hidden C4/18 options are never inferred. */
   opportunityCost: number;
   riskPenalty: number;
   netValue: number;
@@ -380,148 +381,47 @@ const terminalC4GrossValue = ({
   return trainingValue + optionValue + terminalConversionValue;
 };
 
-const c4FriendshipOptionValue = (
-  song: SongTarget,
-  generationProfile: GenerationProfile,
-): number => {
-  if (friendshipValue(song) <= 0) return 0;
-  const effects = acquiredEffectsForSong({
-    song,
-    concertIndex: 3,
-    remainingTrainingsByFacility: estimateRemainingTrainingsByFacility(
-      generationProfile,
-      3,
-    ),
-  });
-  return (
-    effectExposure(effects, "friendship") *
-      TERMINAL_C4_VALUE_CALIBRATION.friendshipTrainingExposure +
-    effectExposure(effects, "sp-training") *
-      TERMINAL_C4_VALUE_CALIBRATION.spTrainingExposure +
-    effectExposure(effects, "practice") *
-      TERMINAL_C4_VALUE_CALIBRATION.practiceTrainingExposure +
-    TERMINAL_C4_VALUE_CALIBRATION.terminalSongConversion
-  );
-};
-
-const maxFundableFriendshipOptionValue = (
-  balance: Balance,
-  songs: readonly SongTarget[],
-  generationProfile: GenerationProfile,
-): number => {
-  const targets = songs
-    .filter((song) => friendshipValue(song) > 0)
-    .map((song) => ({
-      song,
-      value: c4FriendshipOptionValue(song, generationProfile),
-    }))
-    .sort(
-      (left, right) =>
-        right.value - left.value || left.song.id.localeCompare(right.song.id),
-    );
-
-  // C4 currently contains six Friendship songs, so exact subset enumeration is
-  // tiny (<= 64 states) and gives the economic question we actually care
-  // about: which valuable future songs remain jointly fundable after PUSH?
-  const visit = (index: number, current: Balance): number => {
-    if (index >= targets.length) return 0;
-    const item = targets[index];
-    const skipped = visit(index + 1, current);
-    if (!canAfford(current, item.song.cost)) return skipped;
-    return Math.max(
-      skipped,
-      item.value + visit(index + 1, subtractCost(current, item.song.cost)),
-    );
-  };
-  return visit(0, balance);
-};
-
 export type TerminalC4OpportunityCostBreakdown = {
+  /** Legacy diagnostic field. Hidden C4 songs have no STOP-branch option value. */
   friendshipOptionLoss: number;
+  /** Legacy diagnostic field. Raw 18-song progress is never an economic gate. */
   gate18CapacityLoss: number;
   opportunityCost: number;
 };
 
 /**
- * C4 spend is not intrinsically bad: those tokens exist primarily to convert
- * the final effective concert into Friendship. Charge PUSH only when its
- * post-action stock destroys future C4 Friendship options or a currently
- * fundable slice of the 18-song closure.
+ * C4 hidden-song optionality is valued only through executable rollouts.
+ *
+ * STOP closes C4 immediately, so it cannot preserve a hidden Friendship song
+ * behind another technique cycle. Likewise, the raw 18-song counter is
+ * diagnostic only. The old knapsack treated song cost as if it were sufficient
+ * to access a hidden page and therefore charged PUSH for options that the STOP
+ * branch could never exercise.
+ *
+ * Keep this exported breakdown for diagnostics/API stability, but return zero:
+ * any real downstream loss must appear in the paired rollout itself (missed
+ * purchases, final-gauge failure, lower structural value, etc.).
  */
-export const evaluateTerminalC4OpportunityCost = ({
-  beforeBalance,
-  afterBalance,
-  remainingSongs,
-  totalSongsAfterAction,
-  generationProfile = "speed-wit",
-}: {
+export const evaluateTerminalC4OpportunityCost = (_input: {
   beforeBalance: Balance;
   afterBalance: Balance;
   remainingSongs: readonly SongTarget[];
   totalSongsAfterAction: number;
   generationProfile?: GenerationProfile;
-}): TerminalC4OpportunityCostBreakdown => {
-  const friendshipBefore = maxFundableFriendshipOptionValue(
-    beforeBalance,
-    remainingSongs,
-    generationProfile,
-  );
-  const friendshipAfter = maxFundableFriendshipOptionValue(
-    afterBalance,
-    remainingSongs,
-    generationProfile,
-  );
-  const friendshipOptionLoss = Math.max(0, friendshipBefore - friendshipAfter);
-
-  const neededFor18 = Math.max(0, 18 - totalSongsAfterAction);
-  let lostCapacity = 0;
-  if (neededFor18 > 0 && remainingSongs.length > 0) {
-    const beforeAfterLive = applyPromotionalLiveTransition(beforeBalance, 3);
-    const afterAfterLive = applyPromotionalLiveTransition(afterBalance, 3);
-    const beforeCapacity = maximumAffordablePurchases(
-      beforeAfterLive,
-      [...remainingSongs],
-      1200,
-      neededFor18,
-    );
-    const afterCapacity = maximumAffordablePurchases(
-      afterAfterLive,
-      [...remainingSongs],
-      1200,
-      neededFor18,
-    );
-    const proven = (capacity: {
-      count: number;
-      exact: boolean;
-    }): number | null =>
-      capacity.count >= neededFor18
-        ? neededFor18
-        : capacity.exact
-          ? capacity.count
-          : null;
-    const beforeProven = proven(beforeCapacity);
-    const afterProven = proven(afterCapacity);
-    if (beforeProven !== null && afterProven !== null) {
-      lostCapacity = Math.max(0, beforeProven - afterProven);
-    }
-  }
-
-  const gate18CapacityLoss =
-    lostCapacity * TERMINAL_C4_VALUE_CALIBRATION.gate18CapacityLoss;
-  return {
-    friendshipOptionLoss,
-    gate18CapacityLoss,
-    opportunityCost: friendshipOptionLoss + gate18CapacityLoss,
-  };
-};
+}): TerminalC4OpportunityCostBreakdown => ({
+  friendshipOptionLoss: 0,
+  gate18CapacityLoss: 0,
+  opportunityCost: 0,
+});
 
 /**
  * PR-4 terminal C4 policy. The historical profile threshold remains the
  * preferred operating point, but is no longer a binary veto. A Wilson lower
  * bound below the catastrophe floor is still a hard stop. Above that floor,
  * effective training value and terminal conversion are compared explicitly
- * against the marginal loss of future C4 options and a profile-sensitive risk
- * penalty. Raw PR-5 spend remains telemetry/tie-break information only.
+ * with a profile-sensitive risk penalty. Hidden C4 options are valued only by
+ * executable rollout branches; raw PR-5 spend remains telemetry/tie-break
+ * information in the C4 Friendship economy.
  */
 export const evaluateTerminalC4Value = ({
   riskProfile,
@@ -691,6 +591,41 @@ const canonicalTechniqueActionKey = (cost: Balance): string =>
     cost.mental,
   ])}`;
 
+const mergeCurrentContinuation = ({
+  future,
+  continuation,
+}: {
+  future: CrossSectionTrialResult;
+  continuation: TransitionAwareTrialResult;
+}): CrossSectionTrialResult => {
+  const acquiredEffects = [
+    ...continuation.acquiredEffects,
+    ...future.acquiredEffects,
+  ];
+  return {
+    ...future,
+    targetAcquired: continuation.targetAcquired || future.targetAcquired,
+    friendship10Acquired:
+      continuation.friendship10Acquired || future.friendship10Acquired,
+    friendshipBonus: continuation.friendshipBonus + future.friendshipBonus,
+    friendshipPurchases:
+      continuation.friendshipPurchases + future.friendshipPurchases,
+    acquiredEffects,
+    friendshipTrainingExposure: effectExposure(acquiredEffects, "friendship"),
+    spTrainingExposure: effectExposure(acquiredEffects, "sp-training"),
+    practiceTrainingExposure: effectExposure(acquiredEffects, "practice"),
+    structuralPurchases:
+      continuation.structuralPurchases + future.structuralPurchases,
+    purchases: continuation.purchases + future.purchases,
+    techniquePurchases:
+      continuation.techniquePurchases + future.techniquePurchases,
+    lessonSkillPoints:
+      continuation.purchases * 25 +
+      continuation.techniquePurchases * 5 +
+      future.lessonSkillPoints,
+  };
+};
+
 /**
  * Compares STOP_NOW with EXPOSE_AND_CARRY at a terminal technique screen.
  * Sibling technique choices are evaluated with common random numbers. Physical
@@ -740,35 +675,8 @@ export const evaluateTerminalTechniqueOptions = (
   const useC4OpportunityEconomy =
     input.concertIndex === 3 &&
     allC4Songs.some((song) => friendshipValue(song) > 0);
-  const opportunityCache = new Map<string, number>();
-  const c4OpportunityCostFor = ({
-    afterBalance,
-    purchasedSongId,
-    totalSongsAfterAction,
-  }: {
-    afterBalance: Balance;
-    purchasedSongId?: string;
-    totalSongsAfterAction: number;
-  }): number | null => {
-    if (!useC4OpportunityEconomy) return null;
-    const remainingSongs = purchasedSongId
-      ? allC4Songs.filter((song) => song.id !== purchasedSongId)
-      : allC4Songs;
-    const key = `${purchasedSongId ?? "none"}:${totalSongsAfterAction}:${TOKEN_KEYS.map(
-      (token) => afterBalance[token],
-    ).join(",")}`;
-    const cached = opportunityCache.get(key);
-    if (cached !== undefined) return cached;
-    const value = evaluateTerminalC4OpportunityCost({
-      beforeBalance: input.tokens,
-      afterBalance,
-      remainingSongs,
-      totalSongsAfterAction,
-      generationProfile,
-    }).opportunityCost;
-    opportunityCache.set(key, value);
-    return value;
-  };
+  const c4OpportunityCostFor = (): number | null =>
+    useC4OpportunityEconomy ? 0 : null;
   const stopAggregate = emptyAggregate();
 
   const candidateKeyById = new Map<string, string>();
@@ -913,17 +821,13 @@ export const evaluateTerminalTechniqueOptions = (
         committedCost = candidateSpend.totalSpend + transition.spent;
         weightedCommittedCost =
           candidateSpend.weightedDemandCost + transition.spent;
-        // Hotfix v6: every C4 outcome is priced by destroyed future options,
-        // including misses/carry. A failed search is already represented by
-        // the absence of positive Friendship/structural value in that trial;
-        // charging 100% of raw token spend again made 83-88% searches look
-        // irrational even with abundant stock. Outside C4 the PR-5 weighted
-        // spend remains the economic cost.
+        // C4 Friendship searches are valued by executable rollout outcomes.
+        // Hidden C4 songs are not a STOP-branch reserve: STOP closes the section
+        // and makes those pages unreachable. Keep only the small miss penalty
+        // below; outside this C4 Friendship economy, PR-5 weighted spend remains
+        // the economic cost.
         opportunityCost =
-          c4OpportunityCostFor({
-            afterBalance: transition.balance,
-            totalSongsAfterAction: input.totalSongs,
-          }) ?? weightedCommittedCost;
+          c4OpportunityCostFor() ?? weightedCommittedCost;
         if (input.concertIndex === 3 && useC4OpportunityEconomy) {
           opportunityCost += TERMINAL_C4_VALUE_CALIBRATION.failedSearchPenalty;
         }
@@ -983,11 +887,7 @@ export const evaluateTerminalTechniqueOptions = (
               const nextWeightedCommittedCost =
                 weightedCommittedCost + songSpend.weightedDemandCost;
               const nextOpportunityCost =
-                c4OpportunityCostFor({
-                  afterBalance: afterSong,
-                  purchasedSongId: song.id,
-                  totalSongsAfterAction: input.totalSongs + 1,
-                }) ?? nextWeightedCommittedCost;
+                c4OpportunityCostFor() ?? nextWeightedCommittedCost;
               const baseVector = trialVector(purchased);
               const vector =
                 input.concertIndex === 3
@@ -1001,6 +901,127 @@ export const evaluateTerminalTechniqueOptions = (
                 bestResult = purchased;
                 bestVector = vector;
                 bestCommittedCost = committedCost + songSpend.totalSpend;
+                bestWeightedCommittedCost = nextWeightedCommittedCost;
+                bestOpportunityCost = nextOpportunityCost;
+              }
+              continue;
+            }
+
+            if (action.kind === "buy-continue") {
+              const song = page.find(
+                (candidateSong) => candidateSong.id === action.songId,
+              );
+              if (!song) continue;
+
+              const afterSong = subtractCost(transition.balance, song.cost);
+              const nextPool = input.currentSongs.filter(
+                (candidateSong) => candidateSong.id !== song.id,
+              );
+              const songsThisSection = Math.max(
+                0,
+                input.songsThisSection ?? 0,
+              );
+              const songsAfterPurchase = songsThisSection + 1;
+              const planAfterPurchase = deriveStrategicPlan({
+                concertIndex: input.concertIndex,
+                timingMode: "deadline-now",
+                remainingSongs: nextPool,
+                songsThisSection: songsAfterPurchase,
+              });
+              const continuationCycle = (input.nextSongCycle ?? 1) + 1;
+              const continuationTechniques =
+                techniquesForSongCycle(
+                  input.concertIndex,
+                  continuationCycle,
+                ) ?? 0;
+              const continuation = simulateTransitionAwareSongPagesTrial(
+                {
+                  period: input.period,
+                  // Buying the exposed song refreshes techniques in the current
+                  // section, so the inherited offer period no longer applies.
+                  firstOfferPeriod: input.period,
+                  balance: afterSong,
+                  pool: nextPool,
+                  reserveSongs: nextPool,
+                  futureReserveSongs: input.futureSongs ?? [],
+                  plan: planAfterPurchase,
+                  concertIndex: input.concertIndex,
+                  songsThisSection: songsAfterPurchase,
+                  nextSongCycle: continuationCycle,
+                  techniquesToNextSong: continuationTechniques,
+                  // Match the normal CLOSE lookahead: after the current page,
+                  // at most two additional C4 pages are needed to decide
+                  // whether BUY_CONTINUE has executable value.
+                  pages: Math.min(2, nextPool.length),
+                  requiredPurchases: Math.max(
+                    0,
+                    input.plan.manualGaugeTarget - songsAfterPurchase,
+                  ),
+                  acquiredPlanTarget: isChaseTarget(song, input.plan),
+                  timingMode: "deadline-now",
+                  continueForStructuralValue: true,
+                  riskProfile,
+                  generationProfile,
+                  seedKey: `${baseSeed}:continue:${song.id}`,
+                },
+                trial,
+              );
+              const futureAfterContinue = simulateCrossSectionReadinessTrial(
+                {
+                  completedConcertIndex: input.concertIndex,
+                  currentPeriod: input.period,
+                  currentFirstOfferPeriod: input.firstOfferPeriod,
+                  balanceBeforeLive: continuation.retainedBalance,
+                  currentPool: continuation.remainingPool,
+                  futureSongs: input.futureSongs,
+                  totalSongsBeforeNextSection:
+                    input.totalSongs + 1 + continuation.purchases,
+                  riskProfile,
+                  generationProfile,
+                  seedKey: `${baseSeed}:future`,
+                },
+                trial,
+              );
+              if (!futureAfterContinue) continue;
+
+              const continued = mergeCurrentContinuation({
+                future: futureAfterContinue,
+                continuation,
+              });
+              const purchased = withImmediateSongPurchase({
+                result: continued,
+                song,
+                plan: input.plan,
+                concertIndex: input.concertIndex,
+                generationProfile,
+              });
+              const songSpend = techniqueSpendMetrics(
+                song.cost,
+                transition.balance,
+                tokenPressure,
+              );
+              const nextWeightedCommittedCost =
+                weightedCommittedCost +
+                songSpend.weightedDemandCost +
+                continuation.committedCost;
+              const nextOpportunityCost =
+                c4OpportunityCostFor() ?? nextWeightedCommittedCost;
+              const baseVector = trialVector(purchased);
+              const vector =
+                input.concertIndex === 3
+                  ? [
+                      ...baseVector.slice(0, 7),
+                      -nextOpportunityCost,
+                      ...baseVector.slice(7),
+                    ]
+                  : baseVector;
+              if (!bestVector || compareVector(vector, bestVector) > 0) {
+                bestResult = purchased;
+                bestVector = vector;
+                bestCommittedCost =
+                  committedCost +
+                  songSpend.totalSpend +
+                  continuation.committedCost;
                 bestWeightedCommittedCost = nextWeightedCommittedCost;
                 bestOpportunityCost = nextOpportunityCost;
               }
@@ -1026,10 +1047,7 @@ export const evaluateTerminalTechniqueOptions = (
             );
             if (!future) continue;
             const nextOpportunityCost =
-              (c4OpportunityCostFor({
-                afterBalance: transition.balance,
-                totalSongsAfterAction: input.totalSongs,
-              }) ?? weightedCommittedCost) +
+              (c4OpportunityCostFor() ?? weightedCommittedCost) +
               (input.concertIndex === 3 && useC4OpportunityEconomy
                 ? TERMINAL_C4_VALUE_CALIBRATION.failedSearchPenalty
                 : 0);

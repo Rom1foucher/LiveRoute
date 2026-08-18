@@ -794,6 +794,7 @@ export default function App({
             currentSongs: songTargets,
             futureSongs: futureSongTargets,
             totalSongs: ownedSongs.size + 1,
+            songsThisSection,
             plan: strategicPlan,
             riskProfile: effectiveRiskProfile,
             generationProfile: effectiveGenerationProfile,

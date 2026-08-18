@@ -501,3 +501,109 @@ test("hotfix v6 : le budget temporel terminal rend la main avec un diagnostic d'
   );
   assert.ok(assessments.every((assessment) => assessment.trials < 7200));
 });
+
+test("C4 replay 2026-08-17 41/51/51/45/72 : Mental 24 doit PUSH sans optionalité Friendship fictive", () => {
+  const currentSongs = [
+    "kiseki",
+    "nigekiri",
+    "ring-ring",
+    "pyoitto",
+    "yumezora",
+    "present-march",
+    "sekai",
+    "harusora",
+  ].map(songTarget);
+  const plan = deriveStrategicPlan({
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    remainingSongs: currentSongs,
+    songsThisSection: 3,
+  });
+
+  const assessments = evaluateTerminalTechniqueOptions({
+    concertIndex: 3,
+    period: "senior",
+    tokens: balance({
+      dance: 41,
+      passion: 51,
+      vocal: 51,
+      visual: 45,
+      mental: 72,
+    }),
+    candidates: [{ id: "mental-24", cost: balance({ mental: 24 }) }],
+    techniquesRemaining: 4,
+    nextSongCycle: 4,
+    currentSongs,
+    totalSongs: 14,
+    songsThisSection: 3,
+    plan,
+    riskProfile: "standard",
+    generationProfile: "speed-wit",
+    trials: 320,
+    minimumSamples: 320,
+    seedKey: "terminal-technique:3:4:0",
+  });
+
+  assert.ok(assessments);
+  const assessment = assessments[0];
+  assert.ok(assessment);
+  assert.equal(assessment.action, "expose-and-carry");
+  assert.ok(assessment.expectedOpportunityCost <= 2);
+  assert.ok(assessment.grossValue > assessment.expectedOpportunityCost);
+  assert.ok(assessment.netValue > 0);
+});
+
+test("C4 replay 2026-08-18 89/70/66/54/78 : Mental 15 reste un PUSH naturel après correction", () => {
+  const currentSongs = [
+    "nigekiri",
+    "ring-ring",
+    "yume-wo-kakeru",
+    "a-no-ne",
+    "pyoitto",
+    "nanairo",
+    "sekai",
+    "harusora",
+    "fanfare",
+  ].map(songTarget);
+  const plan = deriveStrategicPlan({
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    remainingSongs: currentSongs,
+    songsThisSection: 3,
+  });
+
+  const assessments = evaluateTerminalTechniqueOptions({
+    concertIndex: 3,
+    period: "senior",
+    tokens: balance({
+      dance: 89,
+      passion: 70,
+      vocal: 66,
+      visual: 54,
+      mental: 78,
+    }),
+    candidates: [{ id: "mental-15", cost: balance({ mental: 15 }) }],
+    techniquesRemaining: 4,
+    nextSongCycle: 4,
+    currentSongs,
+    totalSongs: 13,
+    songsThisSection: 3,
+    plan,
+    riskProfile: "standard",
+    generationProfile: "speed-wit",
+    trials: 320,
+    minimumSamples: 320,
+    seedKey: "terminal-technique:3:4:0",
+  });
+
+  assert.ok(assessments);
+  const assessment = assessments[0];
+  assert.ok(assessment);
+  assert.equal(assessment.action, "expose-and-carry");
+  assert.ok(assessment.expectedOpportunityCost <= 2);
+  // This state gains more than one expected structural purchase only when the
+  // terminal rollout can execute BUY_CONTINUE before crossing the C4 Live.
+  assert.ok(assessment.pushExpectedStructuralPurchases > 1);
+  assert.ok(assessment.pushExpectedFriendshipTrainingExposure > 90);
+  assert.ok(assessment.netValue > 0);
+});
