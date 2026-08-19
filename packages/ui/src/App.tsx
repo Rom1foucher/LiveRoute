@@ -121,6 +121,8 @@ import {
 import {
   analysisProbabilityBreakdown,
   analysisSamplingTrace,
+  canonicalAnalysisDecisionDiagnostics,
+  canonicalSongDecisionDiagnostics,
   appendDecisionLog,
   initializeDecisionLog,
   loggedTrackedBalanceAfterConcert,
@@ -630,6 +632,10 @@ export default function App({
             return {
               id: candidate.id,
               label: candidate.songName,
+              canonicalDiagnostics: canonicalSongDecisionDiagnostics(
+                policy,
+                candidate,
+              ),
               safety: !candidate.valid
                 ? "invalid"
                 : candidate.id === displayed?.id
@@ -955,22 +961,30 @@ export default function App({
           const candidate = analyses.find(
             (analysis) => analysis.index === assessment.index,
           );
+          if (!candidate) {
+            throw new Error(
+              `Missing technique analysis for option ${assessment.index + 1}`,
+            );
+          }
+          const rankReasonCode =
+            rankReasonByOptionIndex.get(assessment.index) ?? "stable-id";
           return {
             id: `option-${assessment.index + 1}`,
             label: `Option ${assessment.index + 1}`,
+            canonicalDiagnostics: canonicalAnalysisDecisionDiagnostics({
+              id: `option-${assessment.index + 1}`,
+              action: `technique-option-${assessment.index + 1}`,
+              result: candidate.result,
+              rankReasonCode,
+            }),
             safety: assessment.safety,
-            rankReasonCode:
-              rankReasonByOptionIndex.get(assessment.index) ?? "stable-id",
-            cost: candidate ? { ...candidate.cost } : undefined,
-            reachProbability: candidate?.result.reachProbability,
-            goalProbability: candidate?.result.goalProbability,
-            probabilities: candidate
-              ? analysisProbabilityBreakdown(candidate.result)
-              : undefined,
-            sampling: candidate
-              ? analysisSamplingTrace(candidate.result, techniqueSeedKey)
-              : undefined,
-            terminalDecision: candidate?.result.terminalDecision,
+            rankReasonCode,
+            cost: { ...candidate.cost },
+            reachProbability: candidate.result.reachProbability,
+            goalProbability: candidate.result.goalProbability,
+            probabilities: analysisProbabilityBreakdown(candidate.result),
+            sampling: analysisSamplingTrace(candidate.result, techniqueSeedKey),
+            terminalDecision: candidate.result.terminalDecision,
             blockingReason: assessment.blocking?.detail,
           };
         }),

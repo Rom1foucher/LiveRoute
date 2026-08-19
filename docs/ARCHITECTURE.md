@@ -114,12 +114,16 @@ with the value. Practice stat points, Skill Points, Friendship exposure and
 tokens therefore remain dimensionally distinct. See
 `docs/HORIZON_OUTCOME_V5.md`.
 
-The P3a compatibility projection is gone. A deliberately separate, temporary
-P3b1 decision bridge maps canonical metrics into the existing lexicographic
-`DecisionVector` ordering while P3b2 is still pending. Raw token balance and
-cost are telemetry/feasibility state and do not receive generic utility. P3b2
-must remove that ordering bridge without changing the mechanical metric
-contracts.
+P3b2 converts those mechanics through the named
+`grand-live-stat-numeraire-v1` T1b model under
+`grand-live-zero-income-v1`. Cross-domain additions require explicit exchange
+rates; retained tokens and raw costs have no intrinsic utility. The temporary
+P3b1 metric-to-`DecisionVector` bridge is gone. A compatibility vector carrying
+`utilityStatPoints` remains for selected diagnostics/non-migrated consumers. P5
+unified terminal STOP/PUSH valuation, P4 added paired robustness, and P6
+finalizes their canonical durable representation. See
+`docs/HORIZON_OUTCOME_V5.md`, `docs/ROBUSTNESS_P4.md`, and
+`docs/DECISION_LOG_V5.md`.
 
 ## Persistence and diagnostics
 

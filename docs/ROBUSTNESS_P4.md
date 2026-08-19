@@ -235,9 +235,9 @@ identifier:
 grand-live-v7 -> grand-live-v8
 ```
 
-The diagnostic schema remains v5 in this phase. P6 is intentionally reserved
-for the complete canonical log payload (T1a/T1b/gates/funding/paired robustness
-and first separating tier) instead of mixing that schema migration into P4.
+The diagnostic schema remained v5 in this phase. P6 now finalizes the complete
+canonical log payload (T1a/T1b/gates/funding/paired robustness and first
+separating layer); see `docs/DECISION_LOG_V5.md`.
 
 ## P4 invariants
 
@@ -250,4 +250,4 @@ and first separating tier) instead of mixing that schema migration into P4.
 7. Calibration-only states retain the nominal utility primary.
 8. Risk remains an admission boundary, never a stat-point penalty.
 9. A clearly unsafe branch is not rescued by calibration sensitivity.
-10. P6, not P4, owns the full diagnostic schema migration.
+10. P6 owns the canonical durable diagnostic surface; see `docs/DECISION_LOG_V5.md`.

@@ -221,6 +221,7 @@ type TerminalDecisionSnapshot = {
   coRecommendationReason:
     TerminalTechniqueDecisionSummary["coRecommendationReason"];
   calibrationSensitiveParameters: readonly string[];
+  calibrationBreakpoints: TerminalTechniqueDecisionSummary["calibrationBreakpoints"];
   pairedUtility: TerminalTechniqueDecisionSummary["pairedUtility"];
   timeBudgetExceeded: boolean;
   reachProbability: number;
@@ -229,6 +230,8 @@ type TerminalDecisionSnapshot = {
   expectedOpportunityCost: number;
   riskThreshold: number;
   catastropheFloor: number;
+  admissionThreshold: number;
+  reachConfidenceInterval: readonly [number, number];
   reachConfidenceLowerBound: number;
   grossValue: number;
   riskPenalty: number;
@@ -398,6 +401,9 @@ const terminalSnapshot = (
   coRecommended: [...result.coRecommended],
   coRecommendationReason: result.coRecommendationReason,
   calibrationSensitiveParameters: [...result.calibrationSensitiveParameters],
+  calibrationBreakpoints: result.calibrationBreakpoints.map((breakpoint) => ({
+    ...breakpoint,
+  })),
   pairedUtility: {
     ...result.pairedUtility,
     interval: [...result.pairedUtility.interval] as readonly [number, number],
@@ -409,6 +415,11 @@ const terminalSnapshot = (
   expectedOpportunityCost: result.expectedOpportunityCost,
   riskThreshold: result.riskThreshold,
   catastropheFloor: result.catastropheFloor,
+  admissionThreshold: result.admissionThreshold,
+  reachConfidenceInterval: [...result.reachConfidenceInterval] as readonly [
+    number,
+    number,
+  ],
   reachConfidenceLowerBound: result.reachConfidenceLowerBound,
   grossValue: result.grossValue,
   riskPenalty: result.riskPenalty,

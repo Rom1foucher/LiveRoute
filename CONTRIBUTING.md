@@ -138,13 +138,18 @@ the top of `RELEASE_NOTES.md`. Solver `policyVersion` is intentionally separate
 from application SemVer.
 
 The decision log has an independent `schemaVersion` (currently 5). Increment it
-whenever a field changes type or meaning. NDJSON logs are durable diagnostic
-artifacts and must remain distinguishable across application versions. Schema
-v5 retains `policyVersion`, Monte-Carlo seed/sample/stop metadata, Wilson
-confidence intervals and decomposed page/target probabilities. The historical
-`reachProbability`/`goalProbability` candidate fields are retained as deprecated
-aliases for one compatibility cycle; new diagnostics should consume the v5
-`probabilities` object.
+whenever a durable field changes type or meaning. NDJSON logs are durable
+diagnostic artifacts and must remain distinguishable across application
+versions. P6 finalizes schema v5 around the required
+`candidate.canonicalDiagnostics` payload (`grand-live-decision-diagnostic-v1`),
+which records physical feasibility, T1a/T1b availability, projection/utility
+versions, funding distributions, gates, paired robustness, calibration
+breakpoints and the first separating layer. See `docs/DECISION_LOG_V5.md`.
+
+Historical candidate fields remain compatibility telemetry for one window. New
+durable solver diagnostics must be added to the typed core diagnostic builder
+first; do not reconstruct solver semantics from React labels or add a second
+parallel log contract in the UI.
 
 Standalone solver regressions belong in `packages/core/fixtures/` and can be
 replayed outside the UI with:

@@ -12,6 +12,7 @@ import {
   wilson95,
   type DecisionLogState,
 } from "../src/diagnostics/decision-log.ts";
+import { canonicalAnalysisDecisionDiagnostics } from "../src/diagnostics/decision-diagnostics.ts";
 import {
   browserDecisionSession,
   browserDecisionSink,
@@ -228,6 +229,7 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       coRecommended: ["expose-and-carry"] as const,
       coRecommendationReason: "monte-carlo-not-separated" as const,
       calibrationSensitiveParameters: [],
+      calibrationBreakpoints: [],
       pairedUtility: {
         policy: "grand-live-robustness-v1" as const,
         mean: 0,
@@ -247,6 +249,8 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       expectedOpportunityCost: 0,
       riskThreshold: 0.92,
       catastropheFloor: 0.72,
+      admissionThreshold: 0.72,
+      reachConfidenceInterval: [0.65, 0.83] as const,
       reachConfidenceLowerBound: 0.65,
       grossValue: 0,
       riskPenalty: 0,
@@ -275,4 +279,29 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
   const breakdown = analysisProbabilityBreakdown(result);
   assert.equal(breakdown.pageReachProbability, 1);
   assert.equal(breakdown.terminalUsableOutcomeProbability, 0.75);
+
+  const canonical = canonicalAnalysisDecisionDiagnostics({
+    id: "fixture",
+    action: "technique",
+    result,
+    rankReasonCode: "terminal-hard-state",
+  });
+  assert.equal(canonical.robustness.paired?.interval[0], -1);
+  assert.equal(canonical.robustness.paired?.interval[1], 1);
+  assert.equal(canonical.robustness.riskAdmission.status, "available");
+  if (canonical.robustness.riskAdmission.status === "available") {
+    assert.equal(canonical.robustness.riskAdmission.value.threshold, 0.72);
+    assert.deepEqual(canonical.robustness.riskAdmission.value.interval, {
+      lower: 0.65,
+      upper: 0.83,
+    });
+    assert.equal(
+      canonical.robustness.riskAdmission.value.separation,
+      "not-separated",
+    );
+  }
+  assert.equal(
+    canonical.separation.terminalFirstSeparatingLayer,
+    "robustness",
+  );
 });

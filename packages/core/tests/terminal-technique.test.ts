@@ -610,6 +610,18 @@ test("P4 boundary: Monte-Carlo and calibration uncertainty are reported as both"
   assert.equal(assessment.action, "stop-now");
   assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
   assert.equal(assessment.coRecommendationReason, "both");
+  assert.ok(assessment.calibrationBreakpoints.length > 0);
+  assert.deepEqual(
+    assessment.calibrationBreakpoints.map((breakpoint) => breakpoint.parameter),
+    assessment.calibrationSensitiveParameters,
+  );
+  assert.ok(
+    assessment.calibrationBreakpoints.every(
+      (breakpoint) =>
+        breakpoint.scope === "fixed-projection-policy" &&
+        breakpoint.projectionPolicy === "grand-live-zero-income-v1",
+    ),
+  );
   assert.ok(
     assessment.calibrationSensitiveParameters.includes("SKILL_POINT_UTILITY"),
   );

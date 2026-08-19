@@ -39,6 +39,7 @@ export * from "./solver/value.ts";
 
 export * from "./planner/strategic-plan.ts";
 
+export * from "./diagnostics/decision-diagnostics.ts";
 export * from "./diagnostics/decision-log.ts";
 export * from "./diagnostics/decision-safety.ts";
 

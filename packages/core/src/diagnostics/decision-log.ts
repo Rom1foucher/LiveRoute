@@ -1,4 +1,5 @@
 import type { Message } from "../i18n/messages.ts";
+import type { CanonicalDecisionDiagnostics } from "./decision-diagnostics.ts";
 import type {
   AnalysisObjective,
   AnalysisResult,
@@ -45,6 +46,9 @@ let appVersion = "0.0.0-unconfigured";
 let sink: DecisionSink = nullDecisionSink;
 let session: DecisionSession = volatileDecisionSession();
 let writeQueue: Promise<DecisionSinkStatus | null> = Promise.resolve(null);
+
+/** Final P6 durable log schema. P5 introduced the number; P6 finalizes its canonical payload. */
+export const DECISION_LOG_SCHEMA_VERSION = 5 as const;
 
 /** Policy identity is deliberately separate from the mechanical rule-set id. */
 export const GRAND_LIVE_POLICY_VERSION = "grand-live-v8";
@@ -339,6 +343,8 @@ export type DecisionLogCandidateBase = {
   id: string;
   label: string | null;
   safety: string;
+  /** P6 canonical v5 view; legacy fields below remain compatibility telemetry. */
+  canonicalDiagnostics: CanonicalDecisionDiagnostics;
   valid?: boolean;
   overrideEligible?: boolean;
   /** @deprecated v4: use probabilities.pageReachProbability. */
@@ -424,7 +430,7 @@ export type DecisionLogRecommendation =
     });
 
 export type DecisionLogEntry = {
-  schemaVersion: 5;
+  schemaVersion: typeof DECISION_LOG_SCHEMA_VERSION;
   appVersion: string;
   ruleSetId: string;
   policyVersion: string;
@@ -512,7 +518,7 @@ export const appendDecisionLog = async (
 ): Promise<DecisionSinkStatus | null> => {
   const entry: DecisionLogEntry = {
     ...draft,
-    schemaVersion: 5,
+    schemaVersion: DECISION_LOG_SCHEMA_VERSION,
     appVersion,
     ruleSetId: GRAND_LIVE_RULES.id,
     policyVersion: GRAND_LIVE_POLICY_VERSION,

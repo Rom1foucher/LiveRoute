@@ -7,7 +7,7 @@ The temporary P3b1 metric-to-vector bridge is deleted.
 
 P3b2 originally left terminal C4 and paired Monte-Carlo robustness outside
 this seam. P5 migrated terminal C4, and P4 now adds the robustness stage. The
-full durable diagnostic schema remains P6.
+P6 now finalizes the durable schema in `docs/DECISION_LOG_V5.md`.
 
 ## Pipeline after P3b2
 

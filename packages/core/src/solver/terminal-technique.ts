@@ -875,6 +875,9 @@ export const evaluateTerminalTechniqueOptions = (
       calibrationSensitiveParameters: calibrationBreakpoints.map(
         (breakpoint) => breakpoint.parameter,
       ),
+      calibrationBreakpoints: calibrationBreakpoints.map((breakpoint) => ({
+        ...breakpoint,
+      })),
       pairedUtility: pairedRobustness,
       timeBudgetExceeded,
       seedKey: baseSeed,
@@ -885,6 +888,8 @@ export const evaluateTerminalTechniqueOptions = (
       expectedOpportunityCost: stopUtilityStatPoints,
       riskThreshold: threshold,
       catastropheFloor,
+      admissionThreshold,
+      reachConfidenceInterval: [reachInterval[0], reachInterval[1]] as const,
       reachConfidenceLowerBound: reachLowerBound,
       grossValue: pushUtilityStatPoints,
       riskPenalty: 0,

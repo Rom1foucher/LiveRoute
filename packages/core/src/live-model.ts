@@ -271,6 +271,24 @@ export type SongOutcome = {
   weightedFundingGap: number;
 };
 
+export type TerminalUtilityBreakpoint = {
+  parameter:
+    | "SKILL_POINT_UTILITY"
+    | "FRIENDSHIP_EXPOSURE_STAT_RATE"
+    | "SCENARIO_SKILL_UTILITY"
+    | "SCENARIO_EVENT_UTILITY";
+  value: number;
+  scope: "fixed-projection-policy";
+  projectionPolicy: "grand-live-zero-income-v1";
+  leftId: string;
+  rightId: string;
+  withinCalibrationInterval: boolean | null;
+  withinAdmissibleDomain: boolean;
+  epsilon: number;
+  belowDelta: number;
+  aboveDelta: number;
+};
+
 export type TerminalTechniqueDecisionSummary = {
   applicable: true;
   action: "stop-now" | "expose-and-carry";
@@ -293,6 +311,8 @@ export type TerminalTechniqueDecisionSummary = {
     | null;
   /** Free/bounded utility rates whose admissible breakpoint can reverse this comparison. */
   calibrationSensitiveParameters: readonly string[];
+  /** P6 full fixed-projection breakpoints; parameter names alone are not enough to audit a flip. */
+  calibrationBreakpoints: readonly TerminalUtilityBreakpoint[];
   /** P4 paired uncertainty for U(PUSH) - U(STOP) under common random numbers. */
   pairedUtility: {
     policy: "grand-live-robustness-v1";
@@ -327,7 +347,11 @@ export type TerminalTechniqueDecisionSummary = {
   riskThreshold: number;
   /** Hard Wilson lower-bound catastrophe floor used by terminal safety policy. */
   catastropheFloor: number;
-  /** Wilson 95 % lower bound of terminal usable-outcome reach. */
+  /** Risk boundary actually used for this concert/profile. */
+  admissionThreshold: number;
+  /** Wilson 95 % interval of terminal usable-outcome reach. */
+  reachConfidenceInterval: readonly [number, number];
+  /** Compatibility alias for consumers that only need the lower bound. */
   reachConfidenceLowerBound: number;
   /** Expected T1b utility of the best PUSH continuation. */
   grossValue: number;
