@@ -177,8 +177,14 @@ export type DecisionProbabilityBreakdown = {
   terminalUsableOutcomeProbability?: number;
   /** P(relevant target appears | page reached), before affordability. */
   targetAppearProbabilityGivenReach: number;
-  /** P(target can be funded | target appears and page was reached). */
+  /**
+   * @deprecated v5 P1′: numeric compatibility field. Use
+   * zeroIncomeFundabilityProbability so an unavailable conditioning event can
+   * remain unknown instead of becoming 0.
+   */
   targetAffordableProbabilityGivenAppearance: number;
+  /** P(target is fundable | target appears and page was reached), zero income. */
+  zeroIncomeFundabilityProbability: number | null;
   /** P(find and fund | page reached). */
   findAndFundProbabilityGivenReach: number;
   /** P(page reached and target found and funded). */
@@ -246,17 +252,16 @@ export const analysisProbabilityBreakdown = (
     result.reachProbability > 0
       ? clamp01(totalFindAndFundProbability / result.reachProbability)
       : 0;
+  const zeroIncomeFundabilityProbability =
+    result.zeroIncomeFundabilityProbability;
   const targetAffordableProbabilityGivenAppearance =
-    targetAppearProbabilityGivenReach > 0
-      ? clamp01(
-          findAndFundProbabilityGivenReach / targetAppearProbabilityGivenReach,
-        )
-      : 0;
+    zeroIncomeFundabilityProbability ?? 0;
   return {
     pageReachProbability: result.reachProbability,
     terminalUsableOutcomeProbability: result.terminalDecision?.reachProbability,
     targetAppearProbabilityGivenReach,
     targetAffordableProbabilityGivenAppearance,
+    zeroIncomeFundabilityProbability,
     findAndFundProbabilityGivenReach,
     totalFindAndFundProbability,
   };

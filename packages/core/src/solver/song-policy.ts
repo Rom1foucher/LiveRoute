@@ -7,17 +7,20 @@ import {
   createTechniqueSimulationMemo,
   effectExposure,
   estimateRemainingTrainingsByFacility,
+  fundingGap,
   resolveStrategicObjective,
   structuralTrainingValue,
   withStructuralTrainingValue,
   runAnalysis,
   subtractCost,
   totalCost,
+  weightedFundingGap,
   type AnalysisObjective,
   type AnalysisResult,
   type Balance,
   type GenerationProfile,
   type Period,
+  type PhysicalFundingFeasibility,
   type RemainingTrainingsByFacility,
   type RiskProfile,
   type SongTarget,
@@ -110,6 +113,8 @@ export type SongPolicyEvaluation = {
   valid: boolean;
   /** Exact affordability of a buy policy. Undefined for non-buy actions. */
   affordable?: boolean;
+  /** P1′ exact observed-wallet feasibility for a concrete buy action. */
+  fundingFeasibility?: PhysicalFundingFeasibility;
   /** Can be exposed by the explicit push override without changing normal policy. */
   overrideEligible: boolean;
   /** Presentation rank only. It is never used to make the decision. */
@@ -607,6 +612,15 @@ export const analyzeSongSelection = (
 
   for (const song of visibleSongs) {
     const affordable = canAfford(tokens, song.cost);
+    const immediateSongFundingGap = fundingGap(tokens, song.cost);
+    const fundingFeasibility: PhysicalFundingFeasibility = {
+      physicalAffordable: affordable,
+      immediateFundingGap: immediateSongFundingGap,
+      weightedFundingGap: weightedFundingGap(
+        immediateSongFundingGap,
+        resourceEconomy.shadowPrices,
+      ),
+    };
     const afterPurchase = affordable ? subtractCost(tokens, song.cost) : tokens;
     const nextPool = remainingSongs.filter(
       (candidate) => candidate.id !== song.id,
@@ -1204,6 +1218,7 @@ export const analyzeSongSelection = (
         songName: song.name,
         valid: normalValid,
         affordable,
+        fundingFeasibility,
         overrideEligible,
         score: 0,
         nextSongProbability:

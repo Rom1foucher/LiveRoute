@@ -28,6 +28,32 @@ export const TOKEN_KEYS = [
 
 export type TokenKey = (typeof TOKEN_KEYS)[number];
 export type Balance = Record<TokenKey, number>;
+
+export type FundingGapMass = {
+  gap: number;
+  probability: number;
+};
+
+/**
+ * Empirical zero-income funding-gap distribution, conditional on physically
+ * reaching the song page. An empty distribution means the conditioning event
+ * was never observed; it must not be interpreted as a zero gap.
+ */
+export type FundingGapDistribution = {
+  provenance: "zero-income-projection";
+  conditionedOn: "page-reached";
+  samples: number;
+  byToken: Record<TokenKey, readonly FundingGapMass[]>;
+};
+
+export type PhysicalFundingFeasibility = {
+  /** Hard game rule at the observed wallet. */
+  physicalAffordable: boolean;
+  /** Exact per-colour shortage at the observed wallet. */
+  immediateFundingGap: Balance;
+  /** Immediate gap priced with the common token shadow prices. */
+  weightedFundingGap: number;
+};
 export type Period = "junior" | "classic" | "senior";
 export type TechniqueQuickKind =
   "mono" | "duo-balanced" | "duo-split" | "hint" | "energy";
@@ -228,9 +254,21 @@ export type SongOutcome = {
   name: string;
   priority: boolean;
   utility: number;
+  /** P(song appears | page reached); independent from funding. */
   appearanceProbability: number;
+  /** @deprecated Legacy numeric alias. Use zeroIncomeFundabilityProbability. */
   affordProbability: number;
+  /**
+   * P(song is fundable | page reached) under the explicit zero-income
+   * projection. Null means the page itself was never reached in the sample.
+   */
+  zeroIncomeFundabilityProbability: number | null;
+  /** Joint legacy metric retained until HorizonOutcome migration (P3a). */
   reachAffordAndShownProbability: number;
+  physicalAffordable: boolean;
+  immediateFundingGap: Balance;
+  zeroIncomeFundingGap: FundingGapDistribution;
+  weightedFundingGap: number;
 };
 
 export type TerminalTechniqueDecisionSummary = {
@@ -293,6 +331,16 @@ export type TerminalTechniqueDecisionSummary = {
 export type AnalysisResult = {
   valid: boolean;
   objective: AnalysisObjective;
+  /** P1′ hard feasibility and exact observed-wallet gap for candidateCost. */
+  physicalAffordable: boolean;
+  immediateFundingGap: Balance;
+  weightedFundingGap: number;
+  /**
+   * Aggregate objective fundability under zero future income, conditional on
+   * reaching a page and on a relevant target appearing. Null means the
+   * conditioning event is unavailable rather than zero.
+   */
+  zeroIncomeFundabilityProbability: number | null;
   /** Joint probability P(reach ∧ objective). Kept under the historical name for UI compatibility. */
   goalProbability: number;
   jointGoalProbability: number;
@@ -1047,6 +1095,75 @@ export const totalCost = (cost: Balance): number =>
 export const canAfford = (balance: Balance, cost: Balance): boolean =>
   TOKEN_KEYS.every((key) => balance[key] >= cost[key]);
 
+/** Exact shortage by token colour. More wallet can never increase this gap. */
+export const fundingGap = (balance: Balance, cost: Balance): Balance =>
+  Object.fromEntries(
+    TOKEN_KEYS.map((key) => [key, Math.max(0, cost[key] - balance[key])]),
+  ) as Balance;
+
+export const weightedFundingGap = (
+  gap: Balance,
+  shadowPrices: readonly TokenShadowPrice[],
+): number => {
+  const shadowByKey = Object.fromEntries(
+    shadowPrices.map((price) => [price.key, Math.max(0, price.shadowValue)]),
+  ) as Partial<Record<TokenKey, number>>;
+  return TOKEN_KEYS.reduce(
+    (sum, key) => sum + gap[key] * (shadowByKey[key] ?? 0),
+    0,
+  );
+};
+
+/**
+ * Preserve the full marginal distribution for every colour instead of
+ * collapsing future technique-offer uncertainty into one scalar gap.
+ */
+type FundingGapHistogram = Record<TokenKey, Map<number, number>>;
+
+const createFundingGapHistogram = (): FundingGapHistogram =>
+  Object.fromEntries(
+    TOKEN_KEYS.map((key) => [key, new Map<number, number>()]),
+  ) as FundingGapHistogram;
+
+const recordFundingGap = (
+  histogram: FundingGapHistogram,
+  gap: Balance,
+): void => {
+  for (const key of TOKEN_KEYS) {
+    const value = Math.max(0, gap[key]);
+    const bucket = histogram[key];
+    bucket.set(value, (bucket.get(value) ?? 0) + 1);
+  }
+};
+
+const fundingGapDistributionFromHistogram = (
+  histogram: FundingGapHistogram,
+  samples: number,
+): FundingGapDistribution => ({
+  provenance: "zero-income-projection",
+  conditionedOn: "page-reached",
+  samples,
+  byToken: Object.fromEntries(
+    TOKEN_KEYS.map((key) => [
+      key,
+      [...histogram[key].entries()]
+        .sort(([left], [right]) => left - right)
+        .map(([gap, count]) => ({
+          gap,
+          probability: samples > 0 ? count / samples : 0,
+        })),
+    ]),
+  ) as unknown as Record<TokenKey, readonly FundingGapMass[]>,
+});
+
+export const summarizeFundingGapSamples = (
+  samples: readonly Balance[],
+): FundingGapDistribution => {
+  const histogram = createFundingGapHistogram();
+  for (const sample of samples) recordFundingGap(histogram, sample);
+  return fundingGapDistributionFromHistogram(histogram, samples.length);
+};
+
 export const subtractCost = (balance: Balance, cost: Balance): Balance =>
   Object.fromEntries(
     TOKEN_KEYS.map((key) => [key, balance[key] - cost[key]]),
@@ -1798,15 +1915,30 @@ export const runAnalysis = ({
     0,
     techniquesRemaining - candidateCount,
   );
-  const valid =
-    techniquesRemaining === 0 ||
-    !hasCandidate ||
-    canAfford(tokens, candidateCost);
+  const analysisShadowPrices = calculateShadowPrices(
+    tokens,
+    resourceDemands,
+    generationProfile,
+  );
+  const candidateImmediateFundingGap = hasCandidate
+    ? fundingGap(tokens, candidateCost)
+    : zeroBalance();
+  const physicalAffordable =
+    !hasCandidate || canAfford(tokens, candidateCost);
+  const candidateWeightedFundingGap = weightedFundingGap(
+    candidateImmediateFundingGap,
+    analysisShadowPrices,
+  );
+  const valid = techniquesRemaining === 0 || physicalAffordable;
 
   if (!valid) {
     return {
       valid: false,
       objective,
+      physicalAffordable,
+      immediateFundingGap: candidateImmediateFundingGap,
+      weightedFundingGap: candidateWeightedFundingGap,
+      zeroIncomeFundabilityProbability: null,
       goalProbability: 0,
       jointGoalProbability: 0,
       conditionalGoalProbability: 0,
@@ -1827,7 +1959,15 @@ export const runAnalysis = ({
         appearanceProbability:
           songs.length === 0 ? 0 : Math.min(3, songs.length) / songs.length,
         affordProbability: 0,
+        zeroIncomeFundabilityProbability: null,
         reachAffordAndShownProbability: 0,
+        physicalAffordable: canAfford(tokens, song.cost),
+        immediateFundingGap: fundingGap(tokens, song.cost),
+        zeroIncomeFundingGap: summarizeFundingGapSamples([]),
+        weightedFundingGap: weightedFundingGap(
+          fundingGap(tokens, song.cost),
+          analysisShadowPrices,
+        ),
       })),
       immediateBlockProbability: 1,
       lateBlockProbability: 0,
@@ -1878,6 +2018,9 @@ export const runAnalysis = ({
   let priorityAffordableTotal = 0;
   let expectedBestUtilityTotal = 0;
   const songAffordableCounts = new Map(songs.map((song) => [song.id, 0]));
+  const songFundingGapHistograms = new Map(
+    songs.map((song) => [song.id, createFundingGapHistogram()] as const),
+  );
   const simulationMemo = techniqueMemo ?? createTechniqueSimulationMemo();
   const maxTrials = Math.max(1, Math.trunc(trials));
   const defaultMinimumSamples = Math.min(
@@ -1940,6 +2083,9 @@ export const runAnalysis = ({
             : 1;
       goalSuccessesForConvergence += goalSample;
       for (const song of songs) {
+        const projectedGap = fundingGap(transition.balance, song.cost);
+        const histogram = songFundingGapHistograms.get(song.id);
+        if (histogram) recordFundingGap(histogram, projectedGap);
         if (canAfford(transition.balance, song.cost)) {
           songAffordableCounts.set(
             song.id,
@@ -2024,6 +2170,20 @@ export const runAnalysis = ({
   );
   const conditionalGoalProbability =
     reachProbability <= 0 ? 0 : clamp01(goalProbability / reachProbability);
+  const targetAppearanceProbability =
+    objective === "priority-song"
+      ? prioritySongShownProbability
+      : objective === "any-song"
+        ? anySongShownProbability
+        : 0;
+  const zeroIncomeFundabilityProbability =
+    objective === "carryover" ||
+    reachProbability <= 0 ||
+    targetAppearanceProbability <= 0
+      ? null
+      : clamp01(
+          conditionalGoalProbability / targetAppearanceProbability,
+        );
 
   const threshold = riskThreshold(riskProfile);
   const committedFinalStep =
@@ -2077,6 +2237,9 @@ export const runAnalysis = ({
   const songOutcomes = songs
     .map((song): SongOutcome => {
       const affordableCount = songAffordableCounts.get(song.id) ?? 0;
+      const immediateGap = fundingGap(tokens, song.cost);
+      const histogram =
+        songFundingGapHistograms.get(song.id) ?? createFundingGapHistogram();
       return {
         id: song.id,
         name: song.name,
@@ -2086,8 +2249,20 @@ export const runAnalysis = ({
         utility: song.utility,
         appearanceProbability,
         affordProbability: successes === 0 ? 0 : affordableCount / successes,
+        zeroIncomeFundabilityProbability:
+          successes === 0 ? null : affordableCount / successes,
         reachAffordAndShownProbability:
           (affordableCount / denominator) * appearanceProbability,
+        physicalAffordable: canAfford(tokens, song.cost),
+        immediateFundingGap: immediateGap,
+        zeroIncomeFundingGap: fundingGapDistributionFromHistogram(
+          histogram,
+          successes,
+        ),
+        weightedFundingGap: weightedFundingGap(
+          immediateGap,
+          analysisShadowPrices,
+        ),
       };
     })
     .sort(
@@ -2099,6 +2274,10 @@ export const runAnalysis = ({
   return {
     valid: true,
     objective,
+    physicalAffordable,
+    immediateFundingGap: candidateImmediateFundingGap,
+    weightedFundingGap: candidateWeightedFundingGap,
+    zeroIncomeFundabilityProbability,
     goalProbability,
     jointGoalProbability: goalProbability,
     conditionalGoalProbability,
