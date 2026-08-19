@@ -102,7 +102,7 @@ test("PR-6 : le hash d’état change avec l’état HUNT mais pas avec l’ordr
   assert.notEqual(decisionStateHash(first), decisionStateHash(extraMiss));
 });
 
-test("le journal navigateur écrit un événement v4 lié, versionné et hashé", async () => {
+test("le journal navigateur écrit un événement v5 lié, versionné et hashé", async () => {
   const localStorage = new StorageMock();
   const sessionStorage = new StorageMock();
   Object.assign(globalThis, {
@@ -145,8 +145,8 @@ test("le journal navigateur écrit un événement v4 lié, versionné et hashé"
     localStorage.getItem("grand-live-decision-log-v2") ?? "[]",
   ) as Array<Record<string, unknown>>;
   assert.equal(stored.length, 1);
-  assert.equal(stored[0].schemaVersion, 4);
-  assert.equal(stored[0].policyVersion, "grand-live-v6");
+  assert.equal(stored[0].schemaVersion, 5);
+  assert.equal(stored[0].policyVersion, "grand-live-v7");
   assert.equal(stored[0].previousDecisionId, "decision-1");
   assert.match(String(stored[0].stateHash), /^C3-[0-9A-F]{8}$/);
   assert.equal(stored[0].stateAfterHash, decisionStateHash(stateAfter));
@@ -203,7 +203,7 @@ test("Wilson 95 % reste borné et se resserre avec davantage d’échantillons",
   assert.ok(large.upper - large.lower < small.upper - small.lower);
 });
 
-test("v4 distingue P(page) de P(outcome terminal utilisable)", () => {
+test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
   const base = runAnalysis({
     period: "senior",
     tokens: state([]).tokens,

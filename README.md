@@ -101,7 +101,7 @@ The repository includes three workflows:
 The upstream repository already uses **Settings → Pages → Source → GitHub
 Actions**. A new fork/repository must enable that once before `configure-pages`
 can deploy. `npm run check:versions` prevents the Web/Desktop/Tauri version
-labels from drifting even though solver policy telemetry (`grand-live-v6`) is
+labels from drifting even though solver policy telemetry (`grand-live-v7`) is
 versioned independently from application SemVer. Release tags should only be
 created after the clean-install gate in `docs/VALIDATION.md` passes for the
 exact commit being tagged.

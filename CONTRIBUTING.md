@@ -137,13 +137,13 @@ The root version is shared by all workspace `package.json` files, the Web/Deskto
 the top of `RELEASE_NOTES.md`. Solver `policyVersion` is intentionally separate
 from application SemVer.
 
-The decision log has an independent `schemaVersion` (currently 4). Increment it
+The decision log has an independent `schemaVersion` (currently 5). Increment it
 whenever a field changes type or meaning. NDJSON logs are durable diagnostic
 artifacts and must remain distinguishable across application versions. Schema
-v4 also records `policyVersion`, Monte-Carlo seed/sample/stop metadata, Wilson
+v5 retains `policyVersion`, Monte-Carlo seed/sample/stop metadata, Wilson
 confidence intervals and decomposed page/target probabilities. The historical
 `reachProbability`/`goalProbability` candidate fields are retained as deprecated
-aliases for one compatibility cycle; new diagnostics should consume the v4
+aliases for one compatibility cycle; new diagnostics should consume the v5
 `probabilities` object.
 
 Standalone solver regressions belong in `packages/core/fixtures/` and can be
@@ -157,16 +157,21 @@ npm run replay:fixture --workspace @glcp/core -- fixtures/<fixture>.json
 
 When changing stochastic evaluators, preserve common-random-number symmetry: UI candidate IDs must not alter future draws. Any evaluator that exhausts its adaptive budget while a decision boundary remains unresolved must surface `uncertainAtBudgetLimit` rather than presenting the estimate as converged. See `docs/PR3_MONTE_CARLO.md`.
 
-### PR-4 terminal C4 value policy
+### P5 unified terminal action/value policy
 
-C4 terminal decisions must not reapply the generic risk-threshold gate after
-`evaluateTerminalTechniqueOptions()`. Preserve the Wilson catastrophe floor.
-Current `grand-live-v6` policy prices C4 branches with marginal opportunity
-cost while Friendship remains in the pool; raw weighted spend remains
-diagnostic and must not silently become the decision cost again. Calibration
-changes require a regression demonstrating both value and destroyed future
-options. See `docs/PR4_TERMINAL_C4_VALUE.md` for the original PR and
-`docs/HOTFIX_V6_2026-08-14.md` for the current economy.
+Terminal technique decisions must use the same physical page actions and the
+same T1a/T1b utility model as song policy. The exposed-page switch is
+exhaustive over `buy-stop`, `buy-continue`, and `carry-current-page`; adding a
+new physical action requires an explicit terminal implementation. C4 no longer
+has a separate Friendship-fundability/opportunity-cost economy. Raw token spend
+remains telemetry only; STOP is the opportunity baseline because it preserves
+whatever downstream actions the shared zero-income kernel can still fund.
+
+C1-C3 keep the profile risk threshold as their terminal admission gate. C4
+keeps its Wilson catastrophe floor rather than reapplying the generic threshold.
+The paired `createPairedDifferenceStats` / `pairedMeanInterval` /
+`pairedDifferenceSeparated` path is intentionally retained until P4 generalizes
+uncertainty and co-recommendation. See `docs/P5_TERMINAL_UNIFICATION.md`.
 
 ### PR-5 shared resource economy
 

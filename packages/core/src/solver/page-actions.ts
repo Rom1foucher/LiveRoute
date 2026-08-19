@@ -14,6 +14,13 @@ export type PageAction =
   | { kind: "carry-current-page"; songIds: readonly string[] }
   | { kind: "stop-no-page" };
 
+/** Actions possible while a physical page is actually exposed. */
+export type ExposedPageAction = Exclude<PageAction, { kind: "stop-no-page" }>;
+
+const assertNever = (value: never): never => {
+  throw new Error(`Unhandled page action: ${JSON.stringify(value)}`);
+};
+
 export const canonicalPageSongIds = (
   visibleSongs: readonly Pick<SongTarget, "id">[],
 ): string[] =>
@@ -30,6 +37,8 @@ export const pageActionKey = (action: PageAction): string => {
       return `${action.kind}:${[...action.songIds].sort().join(",")}`;
     case "stop-no-page":
       return action.kind;
+    default:
+      return assertNever(action);
   }
 };
 
@@ -69,4 +78,22 @@ export const enumeratePageActions = ({
   }
 
   return actions;
+};
+
+/**
+ * Typed exposed-page enumerator. Terminal rollouts use this rather than relying
+ * on the runtime fact that STOP_NO_PAGE cannot be emitted for a non-empty page.
+ */
+export const enumerateExposedPageActions = (input: {
+  tokens: Balance;
+  visibleSongs: readonly SongTarget[];
+  timingMode: TimingMode;
+  concertIndex: number;
+}): ExposedPageAction[] => {
+  if (input.visibleSongs.length === 0) {
+    throw new Error("enumerateExposedPageActions requires a visible page");
+  }
+  return enumeratePageActions(input).filter(
+    (action): action is ExposedPageAction => action.kind !== "stop-no-page",
+  );
 };

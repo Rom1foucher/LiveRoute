@@ -5,8 +5,9 @@ P3b2 completes the semantic migration started by P3a/P3b1 for the song solver.
 uses a separate **T1b utility assessment** with an explicit stat-point numeraire.
 The temporary P3b1 metric-to-vector bridge is deleted.
 
-This phase does not generalize terminal C4 or the full paired Monte-Carlo
-co-recommendation policy. Those remain P5 and P4 respectively.
+P3b2 originally left terminal C4 and the full paired Monte-Carlo
+co-recommendation policy outside this seam. P5 has since migrated terminal C4;
+full paired uncertainty/co-recommendation remains P4.
 
 ## Pipeline after P3b2
 
@@ -172,15 +173,17 @@ This separation is deliberate: a **calibration-sensitive** order and a
 **Monte-Carlo-not-separated** order require different remedies and must not be
 collapsed into one notion of uncertainty.
 
-## Compatibility boundary before P5
+## Compatibility boundary after P5
 
 `DecisionVector` remains in the public diagnostics surface for compatibility.
-Song-policy vectors now carry `utilityStatPoints`; when both compared vectors
-have that field, legacy structural/prospective/token lanes are ignored.
+Song-policy vectors carry `utilityStatPoints`; when both compared vectors have
+that field, legacy structural/prospective/token lanes are ignored.
 
-The terminal-technique/C4 evaluator still uses the legacy vector and its
-special opportunity-cost economy. P3b2 does not change that path. P5 will unify
-its action space and remove the separate C4 economy.
+P5 migrated terminal-technique/C4 onto the same T1a/T1b utility seam and
+removed the special C4 opportunity-cost economy. Terminal diagnostics still
+export a compact numeric vector for durable compatibility, but terminal action
+selection itself is the paired T1b comparison documented in
+`P5_TERMINAL_UNIFICATION.md`.
 
 ## P3b2 invariants
 

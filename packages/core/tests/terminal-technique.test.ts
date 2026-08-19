@@ -68,6 +68,7 @@ test("HOLD après SP+3 désactive entièrement la projection terminale de filler
     currentSongs,
     futureSongs,
     totalSongs: 17,
+    songsThisSection: 3,
     plan,
     trials: 120,
     seedKey: "regression-useless-terminal-carry",
@@ -102,6 +103,7 @@ test("C4 sous 18 ne pousse pas une chaîne de fillers uniquement pour le compteu
     techniquesRemaining: 2,
     currentSongs,
     totalSongs: 17,
+    songsThisSection: 0,
     plan,
     trials: 80,
   });
@@ -169,6 +171,7 @@ test("C1 valorise naturellement une page bon marché pouvant révéler et achete
     techniquesRemaining: 1,
     currentSongs,
     totalSongs: 3,
+    songsThisSection: 0,
     plan,
     trials: 300,
     seedKey: "decision-7-seq23",
@@ -181,10 +184,10 @@ test("C1 valorise naturellement une page bon marché pouvant révéler et achete
   assert.ok(cheapVisual);
   assert.equal(cheapVisual.action, "expose-and-carry");
   assert.ok(cheapVisual.pushExpectedFriendshipBonus > 0);
-  assert.match(fr(cheapVisual.reason), /Friendship|structurel/);
+  assert.match(fr(cheapVisual.reason), /valeur|Friendship|structurel/);
 });
 
-test("C1 ne pousse pas par règle fixe quand une page chère ne contient que des fillers", () => {
+test("P5 : un filler terminal peut rester rentable par ses rewards réels sans valeur intrinsèque des tokens", () => {
   const currentSongs = [
     filler("filler-a", { dance: 22, visual: 22 }),
     filler("filler-b", { passion: 22, mental: 22 }),
@@ -209,15 +212,18 @@ test("C1 ne pousse pas par règle fixe quand une page chère ne contient que des
     techniquesRemaining: 4,
     currentSongs,
     totalSongs: 4,
+    songsThisSection: 0,
     plan,
     trials: 120,
     seedKey: "c1-no-hardcoded-push",
   });
   assert.ok(assessments);
-  assert.equal(assessments[0].action, "stop-now");
+  assert.equal(assessments[0].action, "expose-and-carry");
+  assert.ok(assessments[0].grossValue > assessments[0].expectedOpportunityCost);
+  assert.equal(assessments[0].riskPenalty, 0);
 });
 
-test("PR-2 : porter une Friendship jusqu'au Grand Live ne justifie plus PUSH par son bonus brut", () => {
+test("P5 : une Friendship portée au Grand Live vaut ses rewards finaux, pas un bonus d'entraînement fictif", () => {
   const f10: SongTarget = {
     id: "grand-live-f10",
     name: "grand-live-f10",
@@ -247,6 +253,7 @@ test("PR-2 : porter une Friendship jusqu'au Grand Live ne justifie plus PUSH par
     techniquesRemaining: 1,
     currentSongs: [f10],
     totalSongs: 17,
+    songsThisSection: 0,
     plan,
     trials: 80,
     seedKey: "pr2-terminal-grand-live-friendship",
@@ -259,10 +266,13 @@ test("PR-2 : porter une Friendship jusqu'au Grand Live ne justifie plus PUSH par
   assert.equal(assessment.pushFriendship10Probability, 1);
   assert.equal(assessment.pushExpectedFriendshipTrainingExposure, 0);
   assert.equal(assessment.pushEffectiveFriendship10Probability, 0);
-  assert.equal(assessment.action, "stop-now");
-  assert.equal(assessment.reason.code, "terminal.stopNowValue");
+  assert.equal(assessment.action, "expose-and-carry");
+  assert.equal(assessment.reason.code, "terminal.exposeAndCarryValue");
   assert.ok(assessment.expectedWeightedCommittedCost >= 20);
-  assert.ok(assessment.netValue <= 0);
+  // Friendship activates too late to create training exposure, but the carried
+  // song still converts into +25 Lesson SP and crosses the discrete 18-song gate.
+  assert.ok(assessment.grossValue >= 75);
+  assert.ok(assessment.netValue > 0);
 });
 
 test("PR-5.1 : le rollout terminal transmet les demandes aval aux techniques futures", () => {
@@ -291,6 +301,7 @@ test("PR-5.1 : le rollout terminal transmet les demandes aval aux techniques fut
     techniquesRemaining: 3,
     currentSongs,
     totalSongs: 16,
+    songsThisSection: 0,
     plan,
     trials: 80,
     minimumSamples: 80,
@@ -370,6 +381,7 @@ test("C4 replay C4-89AB27AB : le gros stock pousse malgré un spend brut supéri
     nextSongCycle: 1,
     currentSongs,
     totalSongs: 11,
+    songsThisSection: 0,
     plan,
     riskProfile: "standard",
     generationProfile: "speed-wit",
@@ -383,9 +395,10 @@ test("C4 replay C4-89AB27AB : le gros stock pousse malgré un spend brut supéri
   assert.ok(best);
   assert.equal(best.action, "expose-and-carry");
   assert.ok(best.grossValue > 0);
-  assert.ok(best.expectedWeightedCommittedCost > best.grossValue);
+  assert.ok(best.expectedWeightedCommittedCost > 0);
   assert.ok(best.expectedOpportunityCost < best.grossValue);
   assert.ok(best.netValue > 0);
+  assert.equal(best.riskPenalty, 0);
 });
 
 test("hotfix v6 replay C4 : un miss ne retombe plus sur le coût brut quand le stock préserve les options", () => {
@@ -426,6 +439,7 @@ test("hotfix v6 replay C4 : un miss ne retombe plus sur le coût brut quand le s
     nextSongCycle: 3,
     currentSongs,
     totalSongs: 12,
+    songsThisSection: 2,
     plan,
     riskProfile: "standard",
     generationProfile: "speed-wit",
@@ -440,12 +454,11 @@ test("hotfix v6 replay C4 : un miss ne retombe plus sur le coût brut quand le s
   );
   assert.ok(
     assessments.every(
-      (assessment) =>
-        assessment.expectedOpportunityCost <
-        assessment.expectedWeightedCommittedCost * 0.2,
+      (assessment) => assessment.grossValue > assessment.expectedOpportunityCost,
     ),
   );
   assert.ok(assessments.every((assessment) => assessment.netValue > 0));
+  assert.ok(assessments.every((assessment) => assessment.riskPenalty === 0));
 });
 
 test("hotfix v6 : le budget temporel terminal rend la main avec un diagnostic d'incertitude", () => {
@@ -484,6 +497,7 @@ test("hotfix v6 : le budget temporel terminal rend la main avec un diagnostic d'
     techniquesRemaining: 4,
     currentSongs,
     totalSongs: 12,
+    songsThisSection: 2,
     plan,
     trials: 7200,
     minimumSamples: 320,

@@ -1169,6 +1169,7 @@ export const analyzeSongSelection = (
                     pages: transitionPages,
                     requiredPurchases: Math.max(1, requiredFuturePurchases),
                     acquiredPlanTarget: currentIsChaseTarget,
+                    continueForStructuralValue: true,
                   }
                 : undefined,
               riskProfile,

@@ -47,7 +47,7 @@ let session: DecisionSession = volatileDecisionSession();
 let writeQueue: Promise<DecisionSinkStatus | null> = Promise.resolve(null);
 
 /** Policy identity is deliberately separate from the mechanical rule-set id. */
-export const GRAND_LIVE_POLICY_VERSION = "grand-live-v6";
+export const GRAND_LIVE_POLICY_VERSION = "grand-live-v7";
 
 export const configureDecisionLog = (config: DecisionLogConfig): void => {
   appVersion = config.appVersion;
@@ -424,7 +424,7 @@ export type DecisionLogRecommendation =
     });
 
 export type DecisionLogEntry = {
-  schemaVersion: 4;
+  schemaVersion: 5;
   appVersion: string;
   ruleSetId: string;
   policyVersion: string;
@@ -512,7 +512,7 @@ export const appendDecisionLog = async (
 ): Promise<DecisionSinkStatus | null> => {
   const entry: DecisionLogEntry = {
     ...draft,
-    schemaVersion: 4,
+    schemaVersion: 5,
     appVersion,
     ruleSetId: GRAND_LIVE_RULES.id,
     policyVersion: GRAND_LIVE_POLICY_VERSION,

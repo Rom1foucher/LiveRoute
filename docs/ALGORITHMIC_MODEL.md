@@ -2,7 +2,7 @@
 
 This document describes the current solver policy after the 2026-08-13 audit
 correction series (PR-0 through PR-7), identified in decision telemetry as
-`grand-live-v6`. Historical experiments, replay-specific investigations, and
+`grand-live-v7`. Historical experiments, replay-specific investigations, and
 superseded reserve designs are kept under `docs/archive/`; they are not
 normative.
 
@@ -186,11 +186,12 @@ The utility model is `grand-live-stat-numeraire-v1` under projection policy
 not receive fractional gate utility. Retained tokens and committed token cost
 are mechanical state, not utility.
 
-The compatibility `DecisionVector` still exists because terminal-technique and
-durable diagnostics have not yet fully migrated. Song-policy vectors carry
-`utilityStatPoints`, which makes the legacy structural/prospective/token lanes
-non-decisional. Terminal C4 continues to use its legacy comparator and special
-opportunity-cost model until P5. See `docs/HORIZON_OUTCOME_V5.md`.
+The compatibility `DecisionVector` still exists for durable diagnostics, but
+both song policy and terminal-technique decisions now rank projected mechanics
+through T1b `utilityStatPoints`. Terminal C4 no longer owns a separate
+Friendship-fundability/opportunity-cost model; STOP and PUSH are paired outcomes
+of the same cross-section kernel. See `docs/HORIZON_OUTCOME_V5.md` and
+`docs/P5_TERMINAL_UNIFICATION.md`.
 
 Risk thresholds are:
 
@@ -200,15 +201,13 @@ Risk thresholds are:
 | Standard |                   92% |
 | Greedy   |                   78% |
 
-C1-C3 still use these values as conservative admission thresholds. Terminal C4
-is different: the threshold is a preferred operating point, not a binary veto.
-C4 compares effective structural value against marginal opportunity cost and a
-continuous risk penalty. The risk term is scaled by the larger of value-at-risk
-and destroyed future options, so abundant stock does not erase uncertainty. A
-Wilson 95 % lower bound below the catastrophe floor
-(`max(65%, threshold - 20 points)`) remains a hard stop. This removes the
-91.99/92.00 cliff without allowing arbitrarily weak branches to buy their way
-through the risk policy.
+C1-C3 still use these values as conservative terminal admission thresholds.
+C4 keeps a distinct *risk* contract, not a distinct economy: its preferred
+profile threshold is not reapplied as a binary veto, while a Wilson 95 % lower
+bound below the catastrophe floor (`max(65%, threshold - 20 points)`) remains a
+hard stop. Above that floor, STOP and PUSH are compared by the same paired T1b
+utility delta used by the unified terminal evaluator. P4 owns the later
+generalization of paired uncertainty and co-recommendation.
 
 Probability differences inside the same admission band are weak tie-breakers.
 They do not override mechanical constraints, material structural value, or a

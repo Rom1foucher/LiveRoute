@@ -189,7 +189,7 @@ The PR-0 through PR-7 correction series is considered solver-closed when:
 
 - all 236 core tests pass, including PR-1 through PR-7 regression/property tests;
 - all 19 shared UI tests and 77 desktop/OCR tests pass after `npm ci`;
-- `policyVersion` is `grand-live-v6` and NDJSON schema remains v4;
+- `policyVersion` is `grand-live-v7` and NDJSON schema is v5;
 - no exact historical audit fixture is claimed as replayed unless its full raw
   solver state is present under `packages/core/fixtures/`;
 - source documentation distinguishes missing historical evidence from a failed

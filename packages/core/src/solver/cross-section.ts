@@ -44,6 +44,8 @@ export type CurrentSectionContinuation = {
   pages: number;
   requiredPurchases: number;
   acquiredPlanTarget: boolean;
+  /** Explicit BUY_CONTINUE may keep searching for structural value after hard work. */
+  continueForStructuralValue?: boolean;
 };
 
 export type CrossSectionReadinessInput = {
@@ -116,6 +118,26 @@ export type CrossSectionTrialResult = {
   remainingPool: SongTarget[];
 };
 
+/**
+ * One paired zero-income trial across an optional continuation in the section
+ * being closed and the verified Promotional Live transition. The nested result
+ * keeps the same mechanical payload used by aggregate readiness; the explicit
+ * current-section counters let terminal action evaluators value the outgoing
+ * Great Success without reconstructing it from downstream totals.
+ */
+export type CrossSectionActionTrialResult = {
+  result: CrossSectionTrialResult;
+  currentSectionPurchases: number;
+  currentSectionTechniquePurchases: number;
+  /** Raw token spend of the optional pre-Live continuation. */
+  currentSectionCommittedCost: number;
+};
+
+export type CrossSectionActionTrialInput = Omit<
+  CrossSectionReadinessInput,
+  "trials" | "techniqueMemo"
+>;
+
 export type CrossSectionReadinessResult = {
   horizonSections: 1 | 2;
   nextConcertIndex: number;
@@ -185,6 +207,7 @@ const currentTrialInput = ({
   pages: continuation.pages,
   requiredPurchases: continuation.requiredPurchases,
   acquiredPlanTarget: continuation.acquiredPlanTarget,
+  continueForStructuralValue: continuation.continueForStructuralValue,
   riskProfile: input.riskProfile,
   generationProfile: input.generationProfile,
   seedKey: `${input.seedKey ?? "cross-section"}:current`,
@@ -426,6 +449,151 @@ export const simulateCrossSectionReadinessTrial = (
 };
 
 /**
+ * Executes one common-random-number trial for a physical action at a concert
+ * boundary. BUY_CONTINUE uses `currentContinuation`; BUY_STOP omits it; carrying
+ * uses `carriedPage`. All three therefore share the same post-Live kernel.
+ */
+export const simulateCrossSectionActionTrial = (
+  input: CrossSectionActionTrialInput,
+  trialIndex: number,
+  techniqueMemo?: TechniqueSimulationMemo,
+): CrossSectionActionTrialResult | null => {
+  if (input.completedConcertIndex < 0 || input.completedConcertIndex >= 4) {
+    return null;
+  }
+
+  const riskProfile = input.riskProfile ?? "standard";
+  const generationProfile = input.generationProfile ?? "speed-wit";
+  const normalizedInput: CrossSectionReadinessInput = {
+    ...input,
+    riskProfile,
+    generationProfile,
+  };
+  const currentResult = input.currentContinuation
+    ? simulateTransitionAwareSongPagesTrial(
+        currentTrialInput({
+          input: normalizedInput,
+          continuation: input.currentContinuation,
+        }),
+        trialIndex,
+        techniqueMemo,
+      )
+    : null;
+
+  if (currentResult && !currentResult.checkpointMet) return null;
+
+  const immediateResult = simulateCrossSectionReadinessTrial(
+    {
+      completedConcertIndex: input.completedConcertIndex,
+      currentPeriod: input.currentPeriod,
+      currentFirstOfferPeriod: input.currentFirstOfferPeriod,
+      balanceBeforeLive:
+        currentResult?.retainedBalance ?? input.balanceBeforeLive,
+      currentPool: currentResult?.remainingPool ?? input.currentPool,
+      futureSongs: input.futureSongs,
+      totalSongsBeforeNextSection:
+        input.totalSongsBeforeNextSection + (currentResult?.purchases ?? 0),
+      carriedPage: input.carriedPage,
+      carriedSong: input.carriedSong,
+      riskProfile,
+      generationProfile,
+      maxNextSectionPages: input.maxNextSectionPages,
+      commonShadowPrices: input.commonShadowPrices,
+      remainingTrainingsByFacility: input.remainingTrainingsByFacility,
+      friendshipSongMultiplier: input.friendshipSongMultiplier,
+      seedKey: input.seedKey,
+    },
+    trialIndex,
+    techniqueMemo,
+  );
+  if (!immediateResult) return null;
+
+  const laterResult =
+    input.laterSongs && input.laterSongs.length > 0
+      ? simulateCrossSectionReadinessTrial(
+          {
+            completedConcertIndex: immediateResult.nextConcertIndex,
+            currentPeriod: nextPeriodAfter(input.completedConcertIndex),
+            balanceBeforeLive: immediateResult.retainedBalance,
+            currentPool: immediateResult.remainingPool,
+            futureSongs: input.laterSongs,
+            totalSongsBeforeNextSection: immediateResult.totalSongs,
+            riskProfile,
+            generationProfile,
+            maxNextSectionPages: input.maxNextSectionPages,
+            seedKey: `${input.seedKey ?? "cross-section"}:later`,
+          },
+          trialIndex,
+          techniqueMemo,
+        )
+      : null;
+  const nextResult = laterResult ?? immediateResult;
+  const activatedFriendshipEffect = acquiredFriendshipEffect({
+    magnitude: Math.max(0, input.activatedFriendshipBonus ?? 0),
+    concertIndex: input.completedConcertIndex,
+  });
+  const chainedEffects: AcquiredEffect[] = [
+    ...(currentResult?.acquiredEffects ?? []),
+    ...immediateResult.acquiredEffects,
+    ...(laterResult?.acquiredEffects ?? []),
+    ...(activatedFriendshipEffect ? [activatedFriendshipEffect] : []),
+  ];
+  const chainedFriendshipPurchases =
+    (currentResult?.friendshipPurchases ?? 0) +
+    immediateResult.friendshipPurchases +
+    (laterResult?.friendshipPurchases ?? 0);
+  const chainedStructuralPurchases =
+    (currentResult?.structuralPurchases ?? 0) +
+    immediateResult.structuralPurchases +
+    (laterResult?.structuralPurchases ?? 0);
+  const chainedPurchases =
+    (currentResult?.purchases ?? 0) +
+    immediateResult.purchases +
+    (laterResult?.purchases ?? 0);
+  const chainedTechniquePurchases =
+    (currentResult?.techniquePurchases ?? 0) +
+    immediateResult.techniquePurchases +
+    (laterResult?.techniquePurchases ?? 0);
+  const chainedLessonSkillPoints =
+    (currentResult
+      ? currentResult.purchases * 25 + currentResult.techniquePurchases * 5
+      : 0) +
+    immediateResult.lessonSkillPoints +
+    (laterResult?.lessonSkillPoints ?? 0);
+
+  return {
+    currentSectionPurchases: currentResult?.purchases ?? 0,
+    currentSectionTechniquePurchases: currentResult?.techniquePurchases ?? 0,
+    currentSectionCommittedCost: currentResult?.committedCost ?? 0,
+    result: {
+      ...nextResult,
+      checkpointMet: immediateResult.checkpointMet && nextResult.checkpointMet,
+      targetAcquired:
+        immediateResult.targetAcquired && nextResult.targetAcquired,
+      friendship10Acquired:
+        input.activatedFriendship10 === true ||
+        Boolean(currentResult?.friendship10Acquired) ||
+        immediateResult.friendship10Acquired ||
+        Boolean(laterResult?.friendship10Acquired),
+      friendshipBonus:
+        (currentResult?.friendshipBonus ?? 0) +
+        immediateResult.friendshipBonus +
+        (laterResult?.friendshipBonus ?? 0) +
+        Math.max(0, input.activatedFriendshipBonus ?? 0),
+      friendshipPurchases: chainedFriendshipPurchases,
+      acquiredEffects: chainedEffects,
+      friendshipTrainingExposure: effectExposure(chainedEffects, "friendship"),
+      spTrainingExposure: effectExposure(chainedEffects, "sp-training"),
+      practiceTrainingExposure: effectExposure(chainedEffects, "practice"),
+      structuralPurchases: chainedStructuralPurchases,
+      purchases: chainedPurchases,
+      techniquePurchases: chainedTechniquePurchases,
+      lessonSkillPoints: chainedLessonSkillPoints,
+    },
+  };
+};
+
+/**
  * Chains the current terminal decision, the verified +10/+50 live transition,
  * and a bounded value rollout of the following section. No future training
  * income is invented: the result is the guaranteed-stock branch of V(T_live).
@@ -458,151 +626,33 @@ export const evaluateCrossSectionReadiness = (
   let lessonSkillPointTotal = 0;
   let retainedTokenTotal = 0;
   const retainedBalanceTotal = zeroBalance();
-  let representativePlan: StrategicPlan | null = null;
+  let representativePlanId: StrategicPlan["id"] | null = null;
   let representativeCheckpoint: number | null = null;
   const techniqueMemo = input.techniqueMemo ?? createTechniqueSimulationMemo();
 
   for (let trial = 0; trial < trials; trial += 1) {
-    const currentResult = input.currentContinuation
-      ? simulateTransitionAwareSongPagesTrial(
-          currentTrialInput({
-            input: {
-              ...input,
-              riskProfile,
-              generationProfile,
-            },
-            continuation: input.currentContinuation,
-          }),
-          trial,
-          techniqueMemo,
-        )
-      : null;
-
-    if (currentResult && !currentResult.checkpointMet) continue;
-    currentSectionCompletions += 1;
-
-    const immediateResult = simulateCrossSectionReadinessTrial(
+    const actionTrial = simulateCrossSectionActionTrial(
       {
-        completedConcertIndex: input.completedConcertIndex,
-        currentPeriod: input.currentPeriod,
-        currentFirstOfferPeriod: input.currentFirstOfferPeriod,
-        balanceBeforeLive:
-          currentResult?.retainedBalance ?? input.balanceBeforeLive,
-        currentPool: currentResult?.remainingPool ?? input.currentPool,
-        futureSongs: input.futureSongs,
-        totalSongsBeforeNextSection:
-          input.totalSongsBeforeNextSection + (currentResult?.purchases ?? 0),
-        carriedPage: input.carriedPage,
-        carriedSong: input.carriedSong,
+        ...input,
         riskProfile,
         generationProfile,
-        maxNextSectionPages: input.maxNextSectionPages,
-        seedKey: input.seedKey,
       },
       trial,
       techniqueMemo,
     );
-    if (!immediateResult) continue;
+    if (!actionTrial) continue;
+    currentSectionCompletions += 1;
 
-    const laterResult =
-      input.laterSongs && input.laterSongs.length > 0
-        ? simulateCrossSectionReadinessTrial(
-            {
-              completedConcertIndex: immediateResult.nextConcertIndex,
-              currentPeriod: nextPeriodAfter(input.completedConcertIndex),
-              balanceBeforeLive: immediateResult.retainedBalance,
-              currentPool: immediateResult.remainingPool,
-              futureSongs: input.laterSongs,
-              totalSongsBeforeNextSection: immediateResult.totalSongs,
-              riskProfile,
-              generationProfile,
-              maxNextSectionPages: input.maxNextSectionPages,
-              seedKey: `${input.seedKey ?? "cross-section"}:later`,
-            },
-            trial,
-            techniqueMemo,
-          )
-        : null;
-    const nextResult = laterResult ?? immediateResult;
-    // The horizon starts with the optional continuation in the section being
-    // closed. Its purchases already affect the balance and thin the pool fed
-    // to the following sections; their value must therefore be accumulated as
-    // well. Omitting these terms made STOP able to buy the same songs later and
-    // count their value, while BUY_CONTINUE paid for and removed them without
-    // receiving their Friendship, SP or acquisition credit.
-    const chainedFriendshipBonus =
-      (currentResult?.friendshipBonus ?? 0) +
-      immediateResult.friendshipBonus +
-      (laterResult?.friendshipBonus ?? 0);
-    const chainedFriendshipPurchases =
-      (currentResult?.friendshipPurchases ?? 0) +
-      immediateResult.friendshipPurchases +
-      (laterResult?.friendshipPurchases ?? 0);
-    const activatedFriendshipEffect = acquiredFriendshipEffect({
-      magnitude: Math.max(0, input.activatedFriendshipBonus ?? 0),
-      concertIndex: input.completedConcertIndex,
-    });
-    const chainedEffects: AcquiredEffect[] = [
-      ...(currentResult?.acquiredEffects ?? []),
-      ...immediateResult.acquiredEffects,
-      ...(laterResult?.acquiredEffects ?? []),
-      ...(activatedFriendshipEffect ? [activatedFriendshipEffect] : []),
-    ];
-    const chainedFriendshipTrainingExposure = effectExposure(
-      chainedEffects,
-      "friendship",
-    );
-    const chainedSpTrainingExposure = effectExposure(
-      chainedEffects,
-      "sp-training",
-    );
-    const chainedPracticeTrainingExposure = effectExposure(
-      chainedEffects,
-      "practice",
-    );
-    const chainedStructuralPurchases =
-      (currentResult?.structuralPurchases ?? 0) +
-      immediateResult.structuralPurchases +
-      (laterResult?.structuralPurchases ?? 0);
-    const chainedPurchases =
-      (currentResult?.purchases ?? 0) +
-      immediateResult.purchases +
-      (laterResult?.purchases ?? 0);
-    const chainedTechniquePurchases =
-      (currentResult?.techniquePurchases ?? 0) +
-      immediateResult.techniquePurchases +
-      (laterResult?.techniquePurchases ?? 0);
-    const chainedLessonSkillPoints =
-      (currentResult
-        ? currentResult.purchases * 25 + currentResult.techniquePurchases * 5
-        : 0) +
-      immediateResult.lessonSkillPoints +
-      (laterResult?.lessonSkillPoints ?? 0);
-
-    representativePlan ??= deriveStrategicPlan({
-      concertIndex: nextResult.nextConcertIndex,
-      timingMode: "section-open",
-      remainingSongs: nextResult.remainingPool,
-    });
-    representativeCheckpoint ??= nextResult.checkpointRequired;
-    if (immediateResult.checkpointMet && nextResult.checkpointMet) {
-      checkpointSuccesses += 1;
-    }
-    if (immediateResult.targetAcquired && nextResult.targetAcquired) {
-      targetSuccesses += 1;
-    }
-    if (nextResult.totalSongs >= 16) gate16Successes += 1;
-    if (nextResult.totalSongs >= 18) gate18Successes += 1;
+    const result = actionTrial.result;
+    representativePlanId ??= result.nextPlanId;
+    representativeCheckpoint ??= result.checkpointRequired;
+    if (result.checkpointMet) checkpointSuccesses += 1;
+    if (result.targetAcquired) targetSuccesses += 1;
+    if (result.totalSongs >= 16) gate16Successes += 1;
+    if (result.totalSongs >= 18) gate18Successes += 1;
+    if (result.friendship10Acquired) friendship10Successes += 1;
     if (
-      input.activatedFriendship10 === true ||
-      Boolean(currentResult?.friendship10Acquired) ||
-      immediateResult.friendship10Acquired ||
-      Boolean(laterResult?.friendship10Acquired)
-    ) {
-      friendship10Successes += 1;
-    }
-    if (
-      chainedEffects.some(
+      result.acquiredEffects.some(
         (effect) =>
           effect.kind === "friendship" &&
           effect.magnitude >= 10 &&
@@ -611,19 +661,18 @@ export const evaluateCrossSectionReadiness = (
     ) {
       effectiveFriendship10Successes += 1;
     }
-    friendshipBonusTotal +=
-      chainedFriendshipBonus + Math.max(0, input.activatedFriendshipBonus ?? 0);
-    friendshipTrainingExposureTotal += chainedFriendshipTrainingExposure;
-    spTrainingExposureTotal += chainedSpTrainingExposure;
-    practiceTrainingExposureTotal += chainedPracticeTrainingExposure;
-    friendshipPurchaseTotal += chainedFriendshipPurchases;
-    structuralPurchaseTotal += chainedStructuralPurchases;
-    purchaseTotal += chainedPurchases;
-    techniquePurchaseTotal += chainedTechniquePurchases;
-    lessonSkillPointTotal += chainedLessonSkillPoints;
-    retainedTokenTotal += totalCost(nextResult.retainedBalance);
+    friendshipBonusTotal += result.friendshipBonus;
+    friendshipTrainingExposureTotal += result.friendshipTrainingExposure;
+    spTrainingExposureTotal += result.spTrainingExposure;
+    practiceTrainingExposureTotal += result.practiceTrainingExposure;
+    friendshipPurchaseTotal += result.friendshipPurchases;
+    structuralPurchaseTotal += result.structuralPurchases;
+    purchaseTotal += result.purchases;
+    techniquePurchaseTotal += result.techniquePurchases;
+    lessonSkillPointTotal += result.lessonSkillPoints;
+    retainedTokenTotal += totalCost(result.retainedBalance);
     for (const key of TOKEN_KEYS) {
-      retainedBalanceTotal[key] += nextResult.retainedBalance[key];
+      retainedBalanceTotal[key] += result.retainedBalance[key];
     }
   }
 
@@ -663,7 +712,7 @@ export const evaluateCrossSectionReadiness = (
     valueConcertIndex:
       input.completedConcertIndex +
       (input.laterSongs && input.laterSongs.length > 0 ? 2 : 1),
-    nextPlanId: representativePlan?.id ?? "hold",
+    nextPlanId: representativePlanId ?? "hold",
     checkpointRequired: representativeCheckpoint,
     checkpointProbability,
     checkpointState,

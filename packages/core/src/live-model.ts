@@ -293,19 +293,19 @@ export type TerminalTechniqueDecisionSummary = {
   expectedCommittedCost: number;
   /** Shadow-price-weighted expected spend retained as resource telemetry. */
   expectedWeightedCommittedCost: number;
-  /** C4-only loss of future Friendship / 18-song buying options. */
+  /** T1b utility of STOP_NOW, used as the explicit opportunity baseline. */
   expectedOpportunityCost: number;
   /** Preferred operating threshold of the active risk profile. */
   riskThreshold: number;
-  /** Hard Wilson lower-bound floor below which C4 never pushes. */
+  /** Hard Wilson lower-bound catastrophe floor used by terminal safety policy. */
   catastropheFloor: number;
   /** Wilson 95 % lower bound of terminal usable-outcome reach. */
   reachConfidenceLowerBound: number;
-  /** C4 policy value before cost/risk penalties; zero outside C4. */
+  /** Expected T1b utility of the best PUSH continuation. */
   grossValue: number;
-  /** C4 risk penalty; zero outside C4. */
+  /** Explicit terminal risk penalty. P5 keeps this at zero; risk is an admission gate. */
   riskPenalty: number;
-  /** C4 net value after opportunity cost and risk; zero outside C4. */
+  /** Paired expected utility delta U(PUSH) - U(STOP). */
   netValue: number;
   stopCheckpointProbability: number;
   pushCheckpointProbability: number;
