@@ -20,7 +20,9 @@
     "build:desktop": "npm run desktop:build --workspace @glcp/desktop",
     "prepare:ocr": "npm run prepare:ocr --workspace @glcp/desktop",
     "test:ui": "npm run test --workspace @glcp/ui",
-    "test:desktop": "npm run test --workspace @glcp/desktop"
+    "test:desktop": "npm run test --workspace @glcp/desktop",
+    "replay:corpus": "npm run replay:corpus --workspace @glcp/core --",
+    "replay:diff": "npm run replay:diff --workspace @glcp/core --"
   },
   "devDependencies": {
     "prettier": "^3.6.2",

@@ -30,6 +30,24 @@ npm run test:core
 The core tests use only Node's test runner, assertions, and relative source
 imports. They can run without installing the frontend dependencies.
 
+### V5 policy replay work
+
+Before a semantic solver change, snapshot the classified replay corpus:
+
+```bash
+npm run replay:corpus -- packages/core/fixtures/replay-corpus-v5.json replay-before.json
+```
+
+Run the same corpus after the change, then compare the two snapshots:
+
+```bash
+npm run replay:diff -- replay-before.json replay-after.json
+```
+
+`replay:diff` compares canonical solver decisions, not historical recommendations
+or user actions stored as evidence. P3a and any other declared iso-behaviour
+refactor must produce an empty diff. See `docs/REPLAY_CORPUS_V5.md`.
+
 ### Browser or desktop work
 
 ```bash

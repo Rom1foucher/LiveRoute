@@ -1,0 +1,486 @@
+{
+  "corpusVersion": 1,
+  "id": "grand-live-v5-seed",
+  "cases": [
+    {
+      "id": "P0_ANALYSIS_SMOKE",
+      "reviewStatus": "accepted",
+      "evidence": [
+        {
+          "kind": "historical-recommendation",
+          "source": "packages/core/fixtures/analysis-smoke.json",
+          "note": "Existing deterministic smoke regression; recorded output is evidence, not the corpus oracle.",
+          "payload": {
+            "recommendation": "safe"
+          }
+        }
+      ],
+      "fixture": {
+        "fixtureVersion": 1,
+        "id": "P0_ANALYSIS_SMOKE",
+        "kind": "analysis",
+        "input": {
+          "period": "senior",
+          "tokens": {
+            "dance": 80,
+            "passion": 80,
+            "vocal": 80,
+            "visual": 80,
+            "mental": 80
+          },
+          "candidateCost": {
+            "dance": 0,
+            "passion": 0,
+            "vocal": 0,
+            "visual": 0,
+            "mental": 20
+          },
+          "techniquesRemaining": 2,
+          "nextSongCycle": 3,
+          "songs": [],
+          "objective": "carryover",
+          "riskProfile": "standard",
+          "generationProfile": "speed-wit",
+          "seedKey": "fixture:pr0-analysis-smoke",
+          "trials": 512,
+          "minimumSamples": 256
+        }
+      }
+    },
+    {
+      "id": "P0_C1_CARRY_PAGE",
+      "reviewStatus": "accepted",
+      "evidence": [
+        {
+          "kind": "historical-recommendation",
+          "source": "packages/core/tests/song-policy.test.ts",
+          "note": "Regression case: an unaffordable future acquisition must not force a technique chain.",
+          "payload": {
+            "action": "carry-page"
+          }
+        }
+      ],
+      "fixture": {
+        "fixtureVersion": 1,
+        "id": "P0_C1_CARRY_PAGE",
+        "kind": "song-policy",
+        "input": {
+          "period": "junior",
+          "tokens": {
+            "dance": 71,
+            "passion": 86,
+            "vocal": 66,
+            "visual": 57,
+            "mental": 91
+          },
+          "visibleSongs": [
+            {
+              "id": "seishun",
+              "name": "seishun",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 32,
+                "visual": 0,
+                "mental": 12
+              },
+              "roles": [
+                "specialty-priority"
+              ],
+              "priority": false,
+              "utility": 1,
+              "policyValue": 0
+            }
+          ],
+          "remainingSongs": [
+            {
+              "id": "seishun",
+              "name": "seishun",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 32,
+                "visual": 0,
+                "mental": 12
+              },
+              "roles": [
+                "specialty-priority"
+              ],
+              "priority": false,
+              "utility": 1,
+              "policyValue": 0
+            },
+            {
+              "id": "next",
+              "name": "next",
+              "cost": {
+                "dance": 200,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 200,
+                "mental": 0
+              },
+              "roles": [
+                "filler"
+              ],
+              "priority": false,
+              "utility": 1,
+              "policyValue": 0
+            }
+          ],
+          "techniquesToNextSong": 2,
+          "songsThisSection": 0,
+          "totalSongs": 1,
+          "concertIndex": 0,
+          "timingMode": "deadline-now",
+          "nextSongCycle": 1,
+          "trials": 200
+        }
+      }
+    },
+    {
+      "id": "P0_C1_TERMINAL_FRIENDSHIP",
+      "reviewStatus": "accepted",
+      "evidence": [
+        {
+          "kind": "historical-recommendation",
+          "source": "packages/core/tests/terminal-technique.test.ts",
+          "note": "Regression case: a cheap final technique may be worth taking when it exposes a purchasable Friendship before C1.",
+          "payload": {
+            "candidateId": "visual-10",
+            "action": "expose-and-carry"
+          }
+        }
+      ],
+      "fixture": {
+        "fixtureVersion": 1,
+        "id": "P0_C1_TERMINAL_FRIENDSHIP",
+        "kind": "terminal-technique",
+        "input": {
+          "concertIndex": 0,
+          "period": "junior",
+          "tokens": {
+            "dance": 18,
+            "passion": 123,
+            "vocal": 41,
+            "visual": 17,
+            "mental": 19
+          },
+          "candidates": [
+            {
+              "id": "visual-10",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 10,
+                "mental": 0
+              }
+            },
+            {
+              "id": "visual-15",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 15,
+                "mental": 0
+              }
+            },
+            {
+              "id": "vocal-10",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 10,
+                "visual": 0,
+                "mental": 0
+              }
+            }
+          ],
+          "techniquesRemaining": 1,
+          "currentSongs": [
+            {
+              "id": "kiseki",
+              "name": "Believe in Miracles!",
+              "cost": {
+                "dance": 0,
+                "passion": 21,
+                "vocal": 0,
+                "visual": 0,
+                "mental": 21
+              },
+              "priority": false,
+              "roles": [
+                "specialty-priority",
+                "negligible-training-stat"
+              ],
+              "utility": 1,
+              "policyValue": 40,
+              "immediateValue": 0,
+              "liveValue": 1,
+              "practiceValue": 1
+            },
+            {
+              "id": "tachiichi",
+              "name": "Zero Is Where the Center Stands!",
+              "cost": {
+                "dance": 21,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 21,
+                "mental": 0
+              },
+              "priority": false,
+              "roles": [
+                "negligible-training-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 1
+            },
+            {
+              "id": "nigekiri",
+              "name": "Getaway! Fallin' Love",
+              "cost": {
+                "dance": 21,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 21,
+                "mental": 0
+              },
+              "priority": false,
+              "roles": [
+                "negligible-training-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 1
+            },
+            {
+              "id": "go-this-way",
+              "name": "Go This Way",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 21,
+                "visual": 0,
+                "mental": 21
+              },
+              "priority": false,
+              "roles": [
+                "negligible-training-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 1
+            },
+            {
+              "id": "ring-ring",
+              "name": "Ring Ring Diary",
+              "cost": {
+                "dance": 0,
+                "passion": 21,
+                "vocal": 0,
+                "visual": 21,
+                "mental": 0
+              },
+              "priority": false,
+              "roles": [
+                "negligible-training-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 1
+            },
+            {
+              "id": "seishun",
+              "name": "Here Comes Our Time",
+              "cost": {
+                "dance": 0,
+                "passion": 0,
+                "vocal": 32,
+                "visual": 0,
+                "mental": 12
+              },
+              "priority": true,
+              "roles": [
+                "friendship-5"
+              ],
+              "utility": 3,
+              "policyValue": 260,
+              "immediateValue": 0,
+              "liveValue": 5,
+              "practiceValue": 0.5
+            }
+          ],
+          "totalSongs": 3,
+          "plan": {
+            "concertIndex": 0,
+            "id": "accumulate-c1",
+            "mode": "close",
+            "chaseTargets": {
+              "roles": [
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": [
+                "seishun"
+              ]
+            },
+            "visibleOptionalTargets": {
+              "roles": [
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": [
+                "seishun"
+              ]
+            },
+            "reserveTargets": {
+              "roles": [
+                "sp2-target",
+                "sp3-target",
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": [
+                "seishun"
+              ]
+            },
+            "checkpointRequired": null,
+            "manualGaugeTarget": 2,
+            "finalGateRequired": false
+          },
+          "trials": 300,
+          "seedKey": "decision-7-seq23"
+        }
+      }
+    },
+    {
+      "id": "P0_C4_FILLER_STOP",
+      "reviewStatus": "accepted",
+      "evidence": [
+        {
+          "kind": "historical-recommendation",
+          "source": "packages/core/tests/terminal-technique.test.ts",
+          "note": "Regression case: being below 18 does not justify a terminal filler chain by raw count alone.",
+          "payload": {
+            "candidateId": "dance",
+            "action": "stop-now"
+          }
+        }
+      ],
+      "fixture": {
+        "fixtureVersion": 1,
+        "id": "P0_C4_FILLER_STOP",
+        "kind": "terminal-technique",
+        "input": {
+          "concertIndex": 3,
+          "period": "senior",
+          "tokens": {
+            "dance": 180,
+            "passion": 180,
+            "vocal": 180,
+            "visual": 180,
+            "mental": 180
+          },
+          "candidates": [
+            {
+              "id": "dance",
+              "cost": {
+                "dance": 20,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 0,
+                "mental": 0
+              }
+            }
+          ],
+          "techniquesRemaining": 2,
+          "currentSongs": [
+            {
+              "id": "filler-a",
+              "name": "filler-a",
+              "cost": {
+                "dance": 22,
+                "passion": 0,
+                "vocal": 0,
+                "visual": 22,
+                "mental": 0
+              },
+              "priority": false,
+              "roles": [
+                "negligible-flat-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 0
+            },
+            {
+              "id": "filler-b",
+              "name": "filler-b",
+              "cost": {
+                "dance": 0,
+                "passion": 22,
+                "vocal": 0,
+                "visual": 0,
+                "mental": 22
+              },
+              "priority": false,
+              "roles": [
+                "negligible-flat-stat"
+              ],
+              "utility": 0,
+              "policyValue": 0,
+              "immediateValue": 0,
+              "liveValue": 0,
+              "practiceValue": 0
+            }
+          ],
+          "totalSongs": 17,
+          "plan": {
+            "concertIndex": 3,
+            "id": "close-c4",
+            "mode": "close",
+            "chaseTargets": {
+              "roles": [
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": []
+            },
+            "visibleOptionalTargets": {
+              "roles": [
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": []
+            },
+            "reserveTargets": {
+              "roles": [
+                "friendship-10",
+                "friendship-5"
+              ],
+              "ids": []
+            },
+            "checkpointRequired": null,
+            "manualGaugeTarget": 3,
+            "finalGateRequired": false
+          },
+          "trials": 80
+        }
+      }
+    }
+  ]
+}
