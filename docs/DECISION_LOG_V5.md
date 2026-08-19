@@ -310,7 +310,7 @@ policyVersion                        = grand-live-v8
 projectionPolicy                     = grand-live-zero-income-v1
 utilityModel                         = grand-live-stat-numeraire-v1
 robustnessPolicy                     = grand-live-robustness-v1
-application version                  = 1.0.2
+application version                  = 1.0.3
 ```
 
 Change `schemaVersion` when a durable field changes type or meaning. Change the

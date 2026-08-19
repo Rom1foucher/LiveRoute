@@ -159,6 +159,7 @@ export type SongPolicyEvaluation = {
   horizonOutcome: HorizonOutcome;
   /** T1b stat-point utility derived from the same outcome. */
   utilityAssessment: UtilityAssessment;
+  /** Compatibility envelope; T1b utility is authoritative whenever this vector is compared. */
   decisionVector: ReturnType<typeof decisionVectorFromUtilityAssessment>;
   nextSectionReadiness: CrossSectionReadinessResult | null;
   valueOutcome: SongValueOutcome;

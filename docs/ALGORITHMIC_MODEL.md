@@ -1,8 +1,8 @@
 # Current Grand Live algorithmic model
 
-This document describes the current solver policy after the 2026-08-13 audit
-correction series (PR-0 through PR-7), identified in decision telemetry as
-`grand-live-v7`. Historical experiments, replay-specific investigations, and
+This document describes the current solver policy after the 2026-08-19 v5
+architecture/robustness series, identified in decision telemetry as
+`grand-live-v8`. Historical experiments, replay-specific investigations, and
 superseded reserve designs are kept under `docs/archive/`; they are not
 normative.
 
@@ -206,8 +206,8 @@ C4 keeps a distinct *risk* contract, not a distinct economy: its preferred
 profile threshold is not reapplied as a binary veto, while a Wilson 95 % lower
 bound below the catastrophe floor (`max(65%, threshold - 20 points)`) remains a
 hard stop. Above that floor, STOP and PUSH are compared by the same paired T1b
-utility delta used by the unified terminal evaluator. P4 owns the later
-generalization of paired uncertainty and co-recommendation.
+utility delta used by the unified terminal evaluator. P4 adds the explicit
+paired uncertainty/co-recommendation layer without converting risk into utility.
 
 Probability differences inside the same admission band are weak tie-breakers.
 They do not override mechanical constraints, material structural value, or a
@@ -362,12 +362,11 @@ probability. Invalid or unreachable candidates have joint probability zero.
 Qualitative 16/18 capacity diagnostics remain separate from these simulated
 shop probabilities.
 
-Probability-like entries inside song/cross-section `DecisionVector` arrays are
-compared in anchored 5-percentage-point bands (`round(p / 0.05)`). This is an
-absolute quantisation, not a pairwise epsilon: it is therefore transitive. A
-99.0 % versus 99.6 % micro-delta cannot outrank a later deterministic structural
-or economic criterion, while a move into another material band still can. Hard
-and risk-admission fields remain exact.
+The five-percentage-point probability band remains only in compatibility
+`DecisionVector` consumers that have not crossed the explicit T1b utility
+boundary. Song-policy and terminal STOP/PUSH paths use T1a identity probabilities,
+discrete gate rewards, and the P4 robustness layer instead of a generic 5 %
+ranking band.
 
 Adaptive sampling is engine-specific and deterministic:
 

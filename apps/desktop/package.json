@@ -1,7 +1,7 @@
 {
   "name": "@glcp/desktop",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "scripts": {
     "dev": "npm run prepare:ocr && vite",
@@ -14,8 +14,8 @@
     "desktop:build": "tauri build"
   },
   "dependencies": {
-    "@glcp/core": "1.0.2",
-    "@glcp/ui": "1.0.2",
+    "@glcp/core": "1.0.3",
+    "@glcp/ui": "1.0.3",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-global-shortcut": "^2.3.2",
     "@tesseract.js-data/eng": "^1.0.0",

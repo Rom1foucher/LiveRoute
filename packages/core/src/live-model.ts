@@ -263,7 +263,7 @@ export type SongOutcome = {
    * projection. Null means the page itself was never reached in the sample.
    */
   zeroIncomeFundabilityProbability: number | null;
-  /** Joint legacy metric retained until HorizonOutcome migration (P3a). */
+  /** Compatibility joint metric; canonical P6 diagnostics keep appearance and funding separate. */
   reachAffordAndShownProbability: number;
   physicalAffordable: boolean;
   immediateFundingGap: Balance;

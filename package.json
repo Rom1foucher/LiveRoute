@@ -1,7 +1,7 @@
 {
   "name": "grand-live-carryover-planner",
   "private": true,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -14,6 +14,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check:versions": "node scripts/check-version-consistency.mjs",
+    "check:docs": "node scripts/check-doc-consistency.mjs",
     "dev:web": "npm run dev --workspace @glcp/web",
     "dev:desktop": "npm run desktop --workspace @glcp/desktop",
     "build:web": "npm run build --workspace @glcp/web",

@@ -70,8 +70,9 @@ P5 deliberately keeps common-random-number paired statistics:
 
 Adaptive convergence requires both reach stability and separation of the paired
 utility delta around zero. If the sample/time budget ends first,
-`uncertainAtBudgetLimit` remains true. P4, not P5, will generalize this into the
-full co-recommendation and uncertainty schema.
+`uncertainAtBudgetLimit` remains true. P4 generalizes these paired statistics into
+the durable separation/convergence and co-recommendation policy documented in
+`docs/ROBUSTNESS_P4.md`.
 
 ## Regression interpretation
 

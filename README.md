@@ -72,6 +72,7 @@ intentionally ignored by Git.
 
 ```bash
 npm run check:versions
+npm run check:docs
 npm run format:check
 npm run typecheck
 npm test
@@ -80,10 +81,10 @@ npm run build --workspace @glcp/desktop
 npm run build:desktop
 ```
 
-The current post-audit source baseline contains **332 tests**: 236 core, 19
-shared UI, and 77 desktop/OCR tests. The historical v1.0.0/v1.0.1 counts remain
-recorded in the release notes. Full release validation still requires a clean
-`npm ci`, strict TypeScript, both frontend builds, and the Windows native/NSIS
+The current v1.0.3 source inventory contains **379 tests**: 283 core, 19 shared
+UI, and 77 desktop/OCR tests. The 283 core tests remain runnable directly from
+the source archive; full release validation still requires a clean `npm ci`,
+strict TypeScript, Prettier, both frontend builds, and the Windows native/NSIS
 workflow described in `docs/VALIDATION.md`.
 
 ## GitHub distribution
@@ -101,23 +102,26 @@ The repository includes three workflows:
 The upstream repository already uses **Settings → Pages → Source → GitHub
 Actions**. A new fork/repository must enable that once before `configure-pages`
 can deploy. `npm run check:versions` prevents the Web/Desktop/Tauri version
-labels from drifting even though solver policy telemetry (`grand-live-v7`) is
+labels from drifting even though solver policy telemetry (`grand-live-v8`) is
 versioned independently from application SemVer. Release tags should only be
 created after the clean-install gate in `docs/VALIDATION.md` passes for the
 exact commit being tagged.
 
 ## Documentation
 
-| File                                                     | Purpose                                             |
-| -------------------------------------------------------- | --------------------------------------------------- |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)                     | Contribution workflow and repository guards         |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)           | Package boundaries and platform responsibilities    |
-| [`docs/ALGORITHMIC_MODEL.md`](docs/ALGORITHMIC_MODEL.md) | Current decision model and invariants               |
-| [`docs/VISION_PROFILE.md`](docs/VISION_PROFILE.md)       | OCR profile schema and calibration                  |
-| [`docs/VALIDATION.md`](docs/VALIDATION.md)               | Current release validation protocol                 |
-| [`audit closure`](docs/AUDIT_CLOSURE_2026-08-13.md)      | PR-0 through PR-7 audit closure and evidence gaps   |
-| [`RELEASE_NOTES.md`](RELEASE_NOTES.md)                   | User-facing release history                         |
-| [`docs/archive/`](docs/archive)                          | Historical audits, specifications, and pre-V1 notes |
+| File                                                       | Purpose                                             |
+| ---------------------------------------------------------- | --------------------------------------------------- |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                       | Contribution workflow and repository guards         |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)             | Package boundaries and platform responsibilities    |
+| [`docs/ALGORITHMIC_MODEL.md`](docs/ALGORITHMIC_MODEL.md)   | Current decision model and invariants               |
+| [`docs/VISION_PROFILE.md`](docs/VISION_PROFILE.md)         | OCR profile schema and calibration                  |
+| [`docs/VALIDATION.md`](docs/VALIDATION.md)                 | Current release validation protocol                 |
+| [`docs/HORIZON_OUTCOME_V5.md`](docs/HORIZON_OUTCOME_V5.md) | T1a/T1b outcome and utility contract                |
+| [`docs/ROBUSTNESS_P4.md`](docs/ROBUSTNESS_P4.md)           | Paired uncertainty and co-recommendation policy     |
+| [`docs/DECISION_LOG_V5.md`](docs/DECISION_LOG_V5.md)       | Canonical durable decision-log schema               |
+| [`docs/REPLAY_CORPUS_V5.md`](docs/REPLAY_CORPUS_V5.md)     | Classified replay corpus and A/B diff workflow      |
+| [`RELEASE_NOTES.md`](RELEASE_NOTES.md)                     | User-facing release history                         |
+| [`docs/archive/`](docs/archive)                            | Historical audits, specifications, and pre-V1 notes |
 
 Song and token image sources are documented in each application's
 `public/assets/songs/ATTRIBUTION.md` file.

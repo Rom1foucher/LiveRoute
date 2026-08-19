@@ -66,6 +66,8 @@ editions need the feature, it belongs in `packages/ui`.
 ```bash
 npm ci
 npm run check:versions
+npm run check:docs
+npm run format:check
 npm run typecheck
 npm test
 ```
@@ -160,7 +162,7 @@ npm run replay:fixture --workspace @glcp/core -- fixtures/<fixture>.json
 
 ### PR-3 Monte-Carlo diagnostics
 
-When changing stochastic evaluators, preserve common-random-number symmetry: UI candidate IDs must not alter future draws. Any evaluator that exhausts its adaptive budget while a decision boundary remains unresolved must surface `uncertainAtBudgetLimit` rather than presenting the estimate as converged. See `docs/PR3_MONTE_CARLO.md`.
+When changing stochastic evaluators, preserve common-random-number symmetry: UI candidate IDs must not alter future draws. Any evaluator that exhausts its adaptive budget while a decision boundary remains unresolved must surface `uncertainAtBudgetLimit` rather than presenting the estimate as converged. P4 terminal comparisons require real paired per-trial differences; see `docs/ROBUSTNESS_P4.md`.
 
 ### P5 unified terminal action/value policy
 
@@ -174,9 +176,10 @@ whatever downstream actions the shared zero-income kernel can still fund.
 
 C1-C3 keep the profile risk threshold as their terminal admission gate. C4
 keeps its Wilson catastrophe floor rather than reapplying the generic threshold.
-The paired `createPairedDifferenceStats` / `pairedMeanInterval` /
-`pairedDifferenceSeparated` path is intentionally retained until P4 generalizes
-uncertainty and co-recommendation. See `docs/P5_TERMINAL_UNIFICATION.md`.
+The paired `createPairedDifferenceStats` / `pairedMeanInterval` path feeds the P4
+robustness layer, which exposes separation, convergence and co-recommendation
+without turning statistical uncertainty into utility. See
+`docs/P5_TERMINAL_UNIFICATION.md` and `docs/ROBUSTNESS_P4.md`.
 
 ### PR-5 shared resource economy
 
@@ -186,5 +189,6 @@ vectors must be expressed as `ResourceDemand` and consumed through
 are OR-alternatives: their aggregate probability mass is bounded by the number
 of purchases still required and they must not become simultaneous hard
 reserves. Any `BUY_CONTINUE` with a positive technique depth must include at
-least the expected next-cycle technique cost. See
-`docs/PR5_RESOURCE_ECONOMY.md`.
+least the expected next-cycle technique cost. The current resource and terminal
+contracts are summarized in `docs/ALGORITHMIC_MODEL.md` and
+`docs/P5_TERMINAL_UNIFICATION.md`.

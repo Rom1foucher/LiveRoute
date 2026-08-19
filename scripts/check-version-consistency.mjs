@@ -46,6 +46,20 @@ assertEqual(
   cargoPackage?.[1],
 );
 
+const cargoLock = readFileSync("apps/desktop/src-tauri/Cargo.lock", "utf8");
+const cargoLockPackage = cargoLock.match(
+  /\[\[package\]\]\nname = "grand-live-carryover-planner-ocr"\nversion = "([^"]+)"/,
+);
+assertEqual(
+  "apps/desktop/src-tauri/Cargo.lock application package.version",
+  cargoLockPackage?.[1],
+);
+
+const releaseNotes = readFileSync("RELEASE_NOTES.md", "utf8");
+if (!releaseNotes.includes(`## v${expected}`)) {
+  failures.push(`RELEASE_NOTES.md: missing current ## v${expected} section`);
+}
+
 const lock = readJson("package-lock.json");
 const lockPackages = [
   "",

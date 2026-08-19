@@ -21,6 +21,7 @@ Run from a fresh source checkout or from the extracted source archive:
 ```bash
 npm ci
 npm run check:versions
+npm run check:docs
 npm run prepare:ocr
 npm run format:check
 npm run typecheck
@@ -30,19 +31,19 @@ npm run build --workspace @glcp/desktop
 npm run build:desktop
 ```
 
-The current post-audit source baseline is:
+The current v1.0.3 source inventory is:
 
 | Suite           |   Tests |
 | --------------- | ------: |
-| Core and solver |     236 |
+| Core and solver |     283 |
 | Shared UI       |      19 |
 | Desktop and OCR |      77 |
-| **Total**       | **332** |
+| **Total**       | **379** |
 
 The historical v1.0.0 baseline was 268 tests (186/19/63), and v1.0.1 raised
 desktop/OCR coverage to 66 for 271 total tests. Those historical counts remain
 in the release notes and archive. Any intentional test-count change from the
-current 332-test baseline must be explained in the release notes. A lower count
+current 379-test baseline must be explained in the release notes. A lower count
 without an explicit removal is a release blocker.
 
 ## Browser deployment matrix
@@ -183,19 +184,22 @@ build at both base paths, the desktop frontend build, native Tauri compilation,
 and Windows NSIS packaging. v1.0.1 subsequently raised the automated baseline
 to 271 tests (186 core, 19 shared UI, 66 desktop/OCR).
 
-## Current post-audit release gate
+## Current v1.0.3 release gate
 
-The PR-0 through PR-7 correction series is considered solver-closed when:
+The current v1.0.3 solver/release candidate is considered closed when:
 
-- all 236 core tests pass, including PR-1 through PR-7 regression/property tests;
+- all 283 core tests pass, including the classified replay, T1a/T1b, terminal,
+  robustness, and canonical-diagnostic regressions;
 - all 19 shared UI tests and 77 desktop/OCR tests pass after `npm ci`;
-- `policyVersion` is `grand-live-v7` and NDJSON schema is v5;
+- `policyVersion` is `grand-live-v8`, NDJSON schema is v5, and canonical
+  diagnostics use `grand-live-decision-diagnostic-v1`;
 - no exact historical audit fixture is claimed as replayed unless its full raw
   solver state is present under `packages/core/fixtures/`;
 - source documentation distinguishes missing historical evidence from a failed
   current invariant;
 - the source archive contains no generated dependencies or build outputs.
 
-The remaining external-evidence gaps and their synthetic/property coverage are
-listed in `docs/AUDIT_CLOSURE_2026-08-13.md`. They are not grounds to reconstruct
-missing NDJSON states from token vectors alone.
+Historical states that are not present as complete raw fixtures remain evidence
+gaps rather than replay oracles. The classified workflow in
+`docs/REPLAY_CORPUS_V5.md` must not reconstruct missing NDJSON states from token
+vectors alone.

@@ -1,7 +1,8 @@
 # Funding feasibility — v5 P1′
 
-P1′ separates a physical game rule from a zero-income projection. It does not
-change solver utility or ranking policy; those migrations start at P3a.
+P1′ separates a physical game rule from a zero-income projection. The later
+P3/P5/P6 phases consume this contract without changing the distinction between
+physical legality, projected fundability, and utility.
 
 ## Observed state
 
@@ -35,7 +36,7 @@ total cost, and those states are mechanically different.
 ## Legacy compatibility
 
 `goalProbability`, `affordProbability`, and
-`targetAffordableProbabilityGivenAppearance` remain for current UI/log
-compatibility. P1′ adds the explicit fields beside them. P3a will move these
-mechanical quantities into the common `HorizonOutcome` representation while
-reproducing the legacy decision vector exactly.
+`targetAffordableProbabilityGivenAppearance` remain only as compatibility
+telemetry. P3 moved decision mechanics to typed `HorizonOutcome`/T1b, while P6
+preserves the explicit P1′ funding fields in canonical diagnostics instead of
+reconstructing them from those legacy aliases.

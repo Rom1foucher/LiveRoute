@@ -1,5 +1,38 @@
 # Release notes
 
+## v1.0.3 — Grand Live v8 robust decision model — 2026-08-19
+
+- Completed the frozen v5 solver roadmap: classified replay corpus (P0), carried-song
+  resource ranking (P2), explicit funding feasibility (P1′), typed mechanical
+  outcomes (P3a/P3b1), stat-point utility (P3b2), unified terminal actions (P5),
+  robust co-recommendation (P4), and canonical decision diagnostics (P6).
+- Solver telemetry is now `grand-live-v8`. Terminal STOP/PUSH and song actions use
+  the shared T1a/T1b value seam; retained tokens have no intrinsic utility and
+  `buy-continue` is part of the real terminal action space.
+- Decision-log schema v5 is finalized around
+  `grand-live-decision-diagnostic-v1`, including physical feasibility, funding-gap
+  distributions, T1a/T1b versions, discrete gates, paired Monte-Carlo intervals,
+  convergence, calibration breakpoints, and co-recommendation causes.
+- Added `npm run replay:corpus`, `npm run replay:diff`, and the classified v5 seed
+  corpus so semantic changes can be compared independently from historical user
+  choices or recommendations.
+- Raised the application SemVer from 1.0.2 to 1.0.3 across Web, Desktop, Tauri,
+  Cargo, workspaces, and lockfiles. `check:versions` now also verifies the
+  application crate entry in `Cargo.lock` and requires a current release-notes
+  section.
+- Added `npm run check:docs` to CI. It checks current policy/schema identities and
+  rejects broken local Markdown links in active documentation.
+- Current suite inventory is 283 core + 19 shared UI + 77 desktop/OCR = 379 tests.
+  The core 283/283 suite is source-archive runnable; a release tag still requires
+  the clean-install TypeScript/Prettier/UI/Desktop/build/Windows gates in
+  `docs/VALIDATION.md`.
+
+## v1.0.2 — Source metadata baseline — 2026-08-16
+
+- Aligned application/package metadata to 1.0.2 after the post-hotfix stabilization
+  work below. No additional solver-policy change was introduced by the version
+  bump itself.
+
 ## Post-hotfix build, Web and i18n stabilization — 2026-08-15
 
 - Fixed the OCR profile TypeScript contract so schema v6 builds cleanly: the
