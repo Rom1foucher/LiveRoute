@@ -12,9 +12,11 @@ import {
   type Balance,
   type GenerationProfile,
   type Period,
+  type RemainingTrainingsByFacility,
   type RiskProfile,
   type SongTarget,
   type TechniqueSimulationMemo,
+  type TokenShadowPrice,
 } from "../live-model.ts";
 import {
   applyPromotionalLiveTransition,
@@ -33,6 +35,7 @@ import {
   type TransitionAwareSongPagesInput,
 } from "./song-transition.ts";
 import { riskThreshold } from "./value.ts";
+import { selectCarriedPageSong } from "./carried-song-ranking.ts";
 
 export type CurrentSectionContinuation = {
   plan: StrategicPlan;
@@ -71,6 +74,12 @@ export type CrossSectionReadinessInput = {
   activatedFriendship10?: boolean;
   /** Shared within one song-page ranking to reuse identical transition states. */
   techniqueMemo?: TechniqueSimulationMemo;
+  /** P2 prices computed once from the common parent decision state. */
+  commonShadowPrices?: readonly TokenShadowPrice[];
+  /** Exact remaining-training horizon at the carry decision point when known. */
+  remainingTrainingsByFacility?: RemainingTrainingsByFacility;
+  /** Current 1 + Friendship Training Effectiveness used for practice stat value. */
+  friendshipSongMultiplier?: number;
 };
 
 export type CrossSectionTrialInput = Omit<
@@ -264,22 +273,25 @@ export const simulateCrossSectionReadinessTrial = (
         : hiddenChaseStillExists && nextPlan.mode !== "hold"
           ? affordable
           : [];
-    const selected = admitted
-      .map((song) => ({
-        song,
-        target: isChaseTarget(song, nextPlan) ? 1 : 0,
-        structural: structuralTier(song, nextPlan),
-        retained: totalCost(subtractCost(nextBalance, song.cost)),
-        cost: totalCost(song.cost),
-      }))
-      .sort(
-        (left, right) =>
-          right.target - left.target ||
-          right.structural - left.structural ||
-          right.retained - left.retained ||
-          left.cost - right.cost ||
-          left.song.id.localeCompare(right.song.id),
-      )[0]?.song;
+    const carriedSongRankingTrainings =
+      input.remainingTrainingsByFacility ??
+      estimateRemainingTrainingsByFacility(
+        generationProfile,
+        input.completedConcertIndex,
+      );
+    if (!carriedSongRankingTrainings) {
+      throw new Error(
+        `Missing carried-song training horizon for ${generationProfile}`,
+      );
+    }
+    const selected = selectCarriedPageSong({
+      songs: admitted,
+      plan: nextPlan,
+      commonShadowPrices: input.commonShadowPrices ?? [],
+      purchasePointBalance: nextBalance,
+      remainingTrainingsByFacility: carriedSongRankingTrainings,
+      friendshipSongMultiplier: input.friendshipSongMultiplier ?? 1,
+    })?.song;
 
     if (selected) {
       nextBalance = subtractCost(nextBalance, selected.cost);

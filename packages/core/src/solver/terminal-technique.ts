@@ -1,6 +1,7 @@
 import type { Message } from "../i18n/messages.ts";
 import {
   acquiredEffectsForSong,
+  calculateShadowPrices,
   canAfford,
   effectExposure,
   estimateRemainingTrainingsByFacility,
@@ -727,6 +728,13 @@ export const evaluateTerminalTechniqueOptions = (
   const generationProfile = input.generationProfile ?? "speed-wit";
   const tokenPressure = input.tokenPressure ?? [];
   const resourceDemands = input.resourceDemands ?? [];
+  // P2: one cardinal token-space price vector per sibling comparison. It is
+  // intentionally computed before any candidate mutates the wallet.
+  const commonShadowPrices = calculateShadowPrices(
+    input.tokens,
+    resourceDemands,
+    generationProfile,
+  );
   const threshold = riskThreshold(riskProfile);
   const baseSeed = `${input.seedKey ?? "terminal-technique"}:crn`;
   const allC4Songs = [
@@ -858,6 +866,7 @@ export const evaluateTerminalTechniqueOptions = (
         totalSongsBeforeNextSection: input.totalSongs,
         riskProfile,
         generationProfile,
+        commonShadowPrices,
         seedKey: `${baseSeed}:future`,
       },
       trial,
@@ -963,6 +972,7 @@ export const evaluateTerminalTechniqueOptions = (
                   totalSongsBeforeNextSection: input.totalSongs + 1,
                   riskProfile,
                   generationProfile,
+                  commonShadowPrices,
                   seedKey: `${baseSeed}:future`,
                 },
                 trial,
@@ -1020,6 +1030,7 @@ export const evaluateTerminalTechniqueOptions = (
                 carriedPage: page,
                 riskProfile,
                 generationProfile,
+                commonShadowPrices,
                 seedKey: `${baseSeed}:future`,
               },
               trial,
