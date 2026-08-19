@@ -21,6 +21,7 @@ import {
   type UtilityAssessment,
   type UtilityBreakpoint,
   type UtilityParameter,
+  type UtilityParameterId,
 } from "../solver/utility-model.ts";
 import {
   ROBUSTNESS_POLICY,
@@ -104,8 +105,11 @@ export type CanonicalT1aDiagnostics = {
 
 export type CanonicalCalibrationParameter = Pick<
   UtilityParameter,
-  "id" | "value" | "kind" | "calibrationInterval" | "minimum" | "unit"
->;
+  "value" | "kind" | "minimum"
+> & {
+  id: UtilityParameterId;
+  calibrationInterval?: OutcomeInterval;
+};
 
 export type CanonicalT1bDiagnostics = {
   projectionPolicy: typeof PROJECTION_POLICY;
@@ -194,16 +198,31 @@ const cloneBalance = (balance: Balance): Balance =>
   Object.fromEntries(TOKEN_KEYS.map((key) => [key, balance[key]])) as Balance;
 
 const calibrationSnapshot = (): CanonicalCalibrationParameter[] =>
-  Object.values(DEFAULT_UTILITY_CALIBRATION).map((parameter) => ({
-    id: parameter.id,
+  (
+    Object.entries(DEFAULT_UTILITY_CALIBRATION) as [
+      UtilityParameterId,
+      UtilityParameter,
+    ][]
+  ).map(([id, parameter]) => ({
+    id,
     value: parameter.value,
     kind: parameter.kind,
     calibrationInterval: parameter.calibrationInterval
-      ? { ...parameter.calibrationInterval }
+      ? {
+          lower: parameter.calibrationInterval[0],
+          upper: parameter.calibrationInterval[1],
+        }
       : undefined,
     minimum: parameter.minimum,
-    unit: parameter.unit,
   }));
+
+const boundedCalibrationOutcomeInterval = (
+  interval: readonly [number, number] | null,
+  nominalStatPoints: number,
+): OutcomeInterval =>
+  interval
+    ? { lower: interval[0], upper: interval[1] }
+    : { lower: nominalStatPoints, upper: nominalStatPoints };
 
 const physicalFromFunding = (
   funding: PhysicalFundingFeasibility | undefined,
@@ -424,17 +443,12 @@ export const canonicalSongDecisionDiagnostics = (
       projectionPolicy: candidate.utilityAssessment.projectionPolicy,
       utilityModel: candidate.utilityAssessment.utilityModel,
       nominalStatPoints: candidate.utilityAssessment.nominalStatPoints,
-      boundedCalibrationInterval: {
-        ...candidate.utilityAssessment.boundedCalibrationInterval,
-      },
+      boundedCalibrationInterval: boundedCalibrationOutcomeInterval(
+        candidate.utilityAssessment.boundedCalibrationInterval,
+        candidate.utilityAssessment.nominalStatPoints,
+      ),
       contributions: candidate.utilityAssessment.contributions.map(
-        (contribution) => ({
-          ...contribution,
-          sourceMetrics: [...contribution.sourceMetrics],
-          calibrationInterval: contribution.calibrationInterval
-            ? { ...contribution.calibrationInterval }
-            : undefined,
-        }),
+        (contribution) => ({ ...contribution }),
       ),
       linearTerms: {
         fixedStatPoints: candidate.utilityAssessment.linearTerms.fixedStatPoints,

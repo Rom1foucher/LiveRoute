@@ -1,6 +1,5 @@
 import {
   horizonMetricComponent,
-  horizonMetricNumber,
   type HorizonMetricId,
   type HorizonOutcome,
 } from "./horizon-outcome.ts";
@@ -273,20 +272,6 @@ export const decisionVectorFromUtilityAssessment = (
   utilityStatPoints: assessment.nominalStatPoints,
   tieId: assessment.tieId,
 });
-
-const utilityAtCalibration = (
-  assessment: UtilityAssessment,
-  calibration: UtilityCalibration,
-  override: Partial<Record<UtilityParameterId, number>> = {},
-): number => {
-  let total = assessment.linearTerms.fixedStatPoints;
-  for (const id of Object.keys(assessment.linearTerms.coefficients) as UtilityParameterId[]) {
-    total +=
-      assessment.linearTerms.coefficients[id] *
-      (override[id] ?? calibration[id].value);
-  }
-  return total;
-};
 
 export type UtilityBreakpoint = {
   parameter: UtilityParameterId;
