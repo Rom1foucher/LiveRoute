@@ -1,34 +1,43 @@
-# HorizonOutcome v5 — P3a compatibility seam
+# HorizonOutcome v5 — P3b1 mechanical outcome contract
 
-P3a is an architecture migration only. It must not change solver decisions.
-The blocking acceptance criterion is an empty P0 replay diff.
+P3b1 is the semantic normalization step after the P3a iso-behavior seam. It
+removes action-specific legacy projections and makes the quantities used by the
+song solver explicit about **metric identity, unit, provenance, transform and
+uncertainty**.
 
-## Boundary introduced by P3a
+P3b1 intentionally does **not** introduce the final utility model. P3b2 owns
+that calibration. Until then, a small decision bridge preserves the strategic
+lexicographic structure without putting ranking metadata into the mechanical
+schema.
+
+## Pipeline after P3b1
 
 ```text
-song-policy state / projections
-          |
-          v
-    HorizonOutcome
-   raw named components
-   + legacyProjection
-          |
-          |  temporary compatibility only
-          v
-legacyDecisionVectorFromOutcome()
-          |
-          v
-    DecisionVector
-          |
-          v
-compareDecisionVectors()
+physical state / deterministic consequence / zero-income projection
+                         |
+                         v
+                  HorizonOutcome
+              typed mechanical components
+                         |
+                         +------------------------------+
+                         | temporary P3b1 decision      |
+                         | bridge: metric -> lane/order |
+                         v                              |
+                  DecisionVector <---------------------+
+                         |
+                         v
+              compareDecisionVectors()
 ```
 
-`SongPolicyEvaluation.horizonOutcome` is required. Production song policies do
-not construct a `DecisionVector` directly; every vector is derived from the
-outcome through the single compatibility adapter.
+The important boundary is that the **mechanical contract** and the **temporary
+ranking order** are separate:
 
-The five physical song-policy actions use this path:
+- a `MetricId` owns one global `unit` and one global `transform`;
+- action code cannot choose a different transform for the same metric;
+- lane/order metadata is not part of an `OutcomeComponent`;
+- P3b2 can delete the decision bridge without changing consequence production.
+
+The five physical song-policy actions use the same representation:
 
 - `buy-stop`;
 - `buy-continue`;
@@ -36,70 +45,182 @@ The five physical song-policy actions use this path:
 - `carry-page`;
 - `stop-and-carry-stock`.
 
-## Why the representation is a superset
+## Canonical component shape
 
-`HorizonOutcome` separates two structures:
+Each component records a semantic quantity rather than an opaque vector slot:
 
-1. `components`: raw values with metric identities;
-2. `legacyProjection`: references from legacy lanes to those components plus
-   the temporary transform needed to reconstruct the current `DecisionVector`.
-
-This separation is intentional. P3a needs to expose the underlying value
-without changing the old comparator. For example a BUY stores
-`immediate-training-exposure = 41.8` **once**, while two projection references
-interpret it differently:
-
-```text
-raw component      immediate-training-exposure = 41.8
-certain lane       floor-div-20  -> 2
-continuation lane  identity      -> 41.8
+```ts
+type OutcomeComponent = {
+  metric: MetricId;
+  value: number | Interval | Unknown;
+  unit:
+    | "stat-point"
+    | "skill-point"
+    | "friendship-pt-training"
+    | "token"
+    | "count"
+    | "probability";
+  provenance:
+    | "observed"
+    | "deterministic-consequence"
+    | "zero-income-projection";
+  transform: TransformId;
+  uncertainty:
+    | { kind: "none" }
+    | { kind: "monte-carlo"; couplingKey: string }
+    | { kind: "interval" }
+    | { kind: "calibration"; parameter: string }
+    | { kind: "unknown"; source: string };
+};
 ```
 
-The asymmetry is preserved because removing it would be a semantic change, but
-it no longer contaminates the raw consequence. P3b1 can delete
-`legacyProjection` and the adapter while keeping consequence production intact.
+`createHorizonOutcome()` validates that a metric cannot silently change unit or
+transform between actions. Duplicate metrics in one outcome are rejected.
 
-Opaque legacy vector positions are represented as transitional
-`legacy-<lane>:<index>` metric IDs. P3b1 is responsible for replacing these
-with mechanical metric identities where appropriate; P3a must not invent new
-semantics merely to improve names.
+## Dimensional rules
 
-## P3a invariants
+P3b1 separates quantities that the legacy vector could accidentally combine:
 
-1. `HorizonOutcome` contains enough information to reconstruct every legacy
-   song-policy `DecisionVector` exactly.
-2. `song-policy.ts` contains no direct `decisionVector: { ... }` construction.
-3. Legacy `floor(exposure / 20)` is implemented only by the compatibility
-   transform, not by business code.
-4. All action ranking still uses the existing `compareDecisionVectors()`.
-5. Probability banding, lexicographic lane order, retained-token ordering and
-   committed-cost ordering remain unchanged.
-6. P1′ feasibility fields and all existing diagnostics remain unchanged.
-7. P0 replay diff must be empty.
+| Metric family | Unit | Typical provenance |
+| --- | --- | --- |
+| expected practice stat delta | `stat-point` | zero-income projection |
+| expected skill points | `skill-point` | zero-income projection |
+| Friendship training exposure | `friendship-pt-training` | zero-income projection |
+| Great Success / pacing / hunt state | `count` | observed or deterministic consequence |
+| gate reach / target reach | `probability` | zero-income projection |
+| immediate funding gaps | `token` | observed |
+| retained balance | `token` | observed |
+| visible song cost | `token` | deterministic consequence |
+| expected future technique cost | `token` | zero-income projection |
 
-## Explicit non-goals
+Unlike units are never added without a named exchange rate. In particular,
+practice stat output and Skill Points are separate components. The old combined
+"training exposure" quantity no longer exists.
 
-P3a does **not**:
+`Skill Pt(s) Training +N` is classified structurally as `sp-training`, even if
+catalogue roles are absent or change. It cannot fall through to practice-stat
+exposure merely because role metadata is incomplete.
 
-- define the final mechanical `MetricId` catalogue;
-- enforce one transform per metric;
-- correct the `floor-div-20` asymmetry;
-- change probability banding or utility calibration;
-- remove retained tokens from the legacy comparator;
-- remove the separate terminal C4 economy;
-- change the terminal-technique ranking vector;
-- change Monte-Carlo policy or uncertainty handling.
+## One metric, one transform
 
-Those changes belong to later phases and are intentionally prevented from
-leaking into this refactor.
+P3b1 removes the P3a action-specific `floor(exposure / 20)` behavior. A raw
+practice-stat projection such as `41.8` is represented as `41.8 stat-point` and
+uses the same transform everywhere.
 
-## P3b1 deletion contract
+Probability metrics currently use one global 5 % band transform while the
+interim comparator remains lexicographic. This is a transitional decision
+transform, not a claim about final utility. P3b2 is responsible for replacing
+this bridge with explicit utility/robustness semantics.
 
-`legacyDecisionVectorFromOutcome()`, `legacyProjection` and
-`LegacyDecisionTransform` are temporary P3a artifacts. The commit implementing
-P3b1 must remove them rather than leave a fallback compatibility path.
+The P3a artifacts are deleted and guarded against reintroduction:
 
-P3b1 must also add a source-level guard asserting that the adapter no longer
-exists. Until that commit, the P3a source guard performs the inverse check: all
-song-policy actions must go through the seam and legacy transforms must stay out
-of `song-policy.ts`.
+- `legacyDecisionVectorFromOutcome`;
+- `legacyProjection`;
+- `LegacyDecisionTransform`;
+- `createLegacyCompatibleHorizonOutcome`;
+- `floor-div-20`.
+
+## Tokens are state, not utility
+
+`retained-tokens`, visible song cost and funding gaps remain observable
+mechanical state. They do **not** occupy a generic ranking lane and the interim
+`DecisionVector` receives zero retained-token and committed-cost utility from
+`HorizonOutcome`.
+
+Tokens matter only through concrete consequences such as affordability,
+funding gaps, reachable actions and discrete gates. This prevents a solver from
+preferring an otherwise worse action merely because it leaves a larger raw
+wallet.
+
+The P1′ per-color `zeroIncomeFundingGap` distribution remains the authoritative
+fundability diagnostic in `runAnalysis()`. `future-technique-cost-expected` in
+`HorizonOutcome` is explicitly expected-value telemetry with Monte-Carlo
+uncertainty; it is **not** a replacement for that distribution and is not used
+as generic utility.
+
+## Discrete gates
+
+P3b1 does not turn progress counters into fractional gate utility. A raw
+`counter / target` fraction is not used as a substitute for whether a gate is
+crossed or for the probability of crossing it under a zero-income projection.
+
+Gate-oriented metrics are named explicitly, for example:
+
+- `great-success-secured`;
+- `great-success-zero-income-reach`;
+- `final-gauge-zero-income-reach`;
+- `next-page-zero-income-reach`;
+- `next-section-completion-state`.
+
+Adding resources should intuitively not hurt a funding projection, but the
+current rollout kernel also contains policy and Monte-Carlo interactions.
+Therefore zero-income gate reach is documented as a **conservative estimate**,
+not as a mathematically proven lower bound. P3b1 makes no monotonic lower-bound
+claim that the existing kernel cannot guarantee.
+
+## Uncertainty and coupling
+
+Projected cross-section values carry an explicit Monte-Carlo uncertainty with
+a shared `couplingKey`. Related action evaluations can therefore be recognized
+as originating from the same random experiment instead of being mistaken for
+independent certainty.
+
+P3b1 records this structure but does not yet implement the final paired
+robustness comparison. Common-random-number semantics, confidence/robustness
+policy and calibration belong to P3b2.
+
+## Deliberate semantic changes from P3a
+
+P3a had to preserve historical asymmetries exactly; P3b1 is the phase where
+those asymmetries are removed. Replay differences are therefore allowed but
+must be explainable mechanically.
+
+One regression fixture changes from `ring-ring` to `kiseki`: both alternatives
+secure the same Great Success gate, while the typed zero-income practice-stat
+projection for `kiseki` is larger. The former `ring-ring` preference depended
+on legacy vector ordering rather than on an explicit same-unit mechanical
+advantage.
+
+Carry behavior is kept explicit rather than restored through token utility.
+`carry-without-opportunity-delay` represents the specific structural benefit of
+preserving a non-opportunity page and its inherited technique when doing so does
+not postpone a visible target. `carried-page-preserved` itself remains telemetry.
+
+## P3b1 invariants
+
+1. Every `MetricId` has exactly one global unit and transform.
+2. No action supplies its own unit, transform or vector lane.
+3. Stat points, Skill Points, Friendship exposure and tokens are never summed
+   as if they were the same dimension.
+4. Retained tokens and raw token costs are state, never intrinsic utility.
+5. Discrete gates are represented as gates/reach probabilities, not normalized
+   progress counters.
+6. Zero-income projections state their provenance and uncertainty.
+7. The P3a compatibility adapter and transforms no longer exist in core source.
+8. `SongPolicyEvaluation.horizonOutcome` remains required for all five physical
+   action kinds.
+
+## Temporary bridge and P3b2 deletion contract
+
+`decisionVectorFromOutcome()` and its private `p3b1DecisionBridge` are deliberate
+transitional machinery. They map canonical metrics to the current comparator's
+lexicographic lanes **without** changing the mechanical contracts.
+
+P3b2 must replace this bridge with explicit utility/robustness semantics. It
+must not reintroduce action-specific transforms, mixed-unit sums or intrinsic
+token value while doing so.
+
+## Non-goals of P3b1
+
+P3b1 does not:
+
+- calibrate stat points against Skill Points or Friendship exposure;
+- define the final scalar/lexicographic utility function;
+- prove Monte-Carlo monotonicity or confidence bounds;
+- replace P1′ funding-gap distributions with a scalar;
+- unify the separate terminal C4 economy;
+- fix the terminal `buy-continue` action-space divergence;
+- change terminal-technique ranking into the final outcome model.
+
+Those changes belong to P3b2 and later phases in the frozen implementation
+order.

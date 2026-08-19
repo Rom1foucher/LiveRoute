@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { selectCarryoverPolicy } from "../src/domain/carryover-selection.ts";
 import {
-  createLegacyCompatibleHorizonOutcome,
-  legacyDecisionVectorFromOutcome,
+  createHorizonOutcome,
+  decisionVectorFromOutcome,
+  outcomeComponent,
 } from "../src/solver/horizon-outcome.ts";
 import type { SongPolicyEvaluation } from "../src/solver/song-policy.ts";
 
@@ -15,15 +16,17 @@ const policy = (
   valid = true,
   carriedSongIds?: readonly string[],
 ): SongPolicyEvaluation => {
-  const horizonOutcome = createLegacyCompatibleHorizonOutcome({
+  const horizonOutcome = createHorizonOutcome({
     tieId: id,
-    hard,
-    riskAdmissible: 1,
-    prospective: [],
-    structural: 1,
-    continuation: [],
-    retainedTokens: 0,
-    committedCost: 0,
+    components: [
+      outcomeComponent("hard-state", hard, "deterministic-consequence"),
+      outcomeComponent(
+        "risk-admissible-state",
+        1,
+        "deterministic-consequence",
+      ),
+      outcomeComponent("structural-tier", 1, "deterministic-consequence"),
+    ],
   });
   return {
     id,
@@ -48,7 +51,7 @@ const policy = (
     continuationRecommendation: null,
     abandonsHunt: false,
     horizonOutcome,
-    decisionVector: legacyDecisionVectorFromOutcome(horizonOutcome),
+    decisionVector: decisionVectorFromOutcome(horizonOutcome),
     nextSectionReadiness: null,
     valueOutcome: {
       lessonSkillPoints: 0,

@@ -13,7 +13,7 @@ import {
   type ResourceDemand,
   type SongTarget,
 } from "../src/index.ts";
-
+import { horizonMetricNumber } from "../src/solver/horizon-outcome.ts";
 const balance = (partial: Partial<Balance> = {}): Balance => ({
   dance: 0,
   passion: 0,
@@ -173,9 +173,16 @@ test("PR-5 : BUY_CONTINUE paie au minimum le prochain cycle technique", () => {
       (candidate) => candidate.id === policy.songId,
     );
     assert.ok(song);
+    assert.equal(
+      horizonMetricNumber(policy.horizonOutcome, "visible-song-cost"),
+      totalCost(song.cost),
+    );
     assert.ok(
-      policy.decisionVector.committedCost > totalCost(song.cost),
-      `${policy.id} must include future technique cost`,
+      (horizonMetricNumber(
+        policy.horizonOutcome,
+        "future-technique-cost-expected",
+      ) ?? 0) > 0,
+      `${policy.id} must expose future technique cost as token state`,
     );
     // This fixture closes Great Success with the current purchase, so the
     // extra cost comes from the cheap one-cycle estimate rather than a deeper

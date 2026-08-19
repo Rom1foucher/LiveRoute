@@ -51,10 +51,12 @@ import { evaluatePageCoverage, maximumAffordablePurchases } from "./song-dp.ts";
 import { assessCheckpointSupply } from "./supply-model.ts";
 import { compareDecisionVectors, riskThreshold } from "./value.ts";
 import {
-  createLegacyCompatibleHorizonOutcome,
-  horizonValue,
-  legacyDecisionVectorFromOutcome,
+  createHorizonOutcome,
+  decisionVectorFromOutcome,
+  outcomeComponent,
   type HorizonOutcome,
+  type HorizonOutcomeComponent,
+  type OutcomeUncertainty,
 } from "./horizon-outcome.ts";
 import { evaluateTransitionAwareSongPages } from "./song-transition.ts";
 import {
@@ -142,9 +144,9 @@ export type SongPolicyEvaluation = {
   huntAbandonReason?: Message;
   /** PR-6 marginal HUNT vs HOLD comparison. */
   huntDecision?: HuntDecision;
-  /** P3a canonical consequence representation; legacy vector is derived from it. */
+  /** P3b1 canonical typed consequences; the temporary vector bridge is derived globally by MetricId. */
   horizonOutcome: HorizonOutcome;
-  decisionVector: ReturnType<typeof legacyDecisionVectorFromOutcome>;
+  decisionVector: ReturnType<typeof decisionVectorFromOutcome>;
   nextSectionReadiness: CrossSectionReadinessResult | null;
   valueOutcome: SongValueOutcome;
   /** MC runs that materially informed this policy. Diagnostics only. */
@@ -557,50 +559,146 @@ export const analyzeSongSelection = (
       : trials <= 8000
         ? Math.min(trials, 128)
         : Math.min(trials, 224);
+  const crossSectionCouplingKey =
+    `cross-section:${concertIndex}:${nextSongCycle}:terminal`;
   const visibleAffordableChaseTarget = visibleSongs.some(
     (candidate) =>
       isChaseTarget(candidate, plan) && canAfford(tokens, candidate.cost),
   );
-  const intermediateGreatSuccessStatValue = (
-    probability: number | null,
-  ): number =>
-    timingMode === "deadline-now" && concertIndex < 4
-      ? 35 * (probability ?? 0)
-      : 0;
-  const activeHuntPrefix = (
+  const activeHuntComponents = (
     state: "acquired-now" | "preserved" | "carried" | "abandoned",
     probability = 0,
     huntDecision: HuntDecision | null = null,
-  ): number[] => {
+  ): HorizonOutcomeComponent[] => {
     if (plan.mode !== "hunt") return [];
-    if (state === "acquired-now") return [3, 1];
-    if (state === "carried") return [2, 1];
-    if (
-      state === "preserved" &&
-      (huntDecision === null || huntDecision.action === "continue-hunt")
-    ) {
-      return [2, probability];
-    }
-    return [0, probability];
+    const rank =
+      state === "acquired-now"
+        ? 3
+        : state === "carried" ||
+            (state === "preserved" &&
+              (huntDecision === null || huntDecision.action === "continue-hunt"))
+          ? 2
+          : 0;
+    return [
+      outcomeComponent(
+        "hunt-state-rank",
+        rank,
+        "deterministic-consequence",
+      ),
+      outcomeComponent(
+        "hunt-target-probability",
+        state === "acquired-now" || state === "carried" ? 1 : probability,
+        "zero-income-projection",
+      ),
+    ];
   };
-  const pacingDecisionPrefix = (
+  const pacingDecisionComponents = (
     totalAfterAction: number,
     continuing: boolean,
     continuationProbability: number,
-  ): number[] => {
+  ): HorizonOutcomeComponent[] => {
     if (pacingTarget === null) return [];
-    if (totalAfterAction >= pacingTarget) return [2, 1];
-    if (continuing) {
-      // A pacing target is not a mechanical gate. Compare continuation by risk
-      // class rather than by sampling decimals: 99.96 % must not beat 99.61 %
-      // before the intrinsic value of a visible Friendship +10 is considered.
+    if (totalAfterAction >= pacingTarget) {
       return [
-        continuationProbability > 0 ? 2 : 0,
-        continuationProbability >= threshold ? 2 : 1,
+        outcomeComponent("pacing-state-rank", 2, "deterministic-consequence"),
+        outcomeComponent("pacing-risk-rank", 2, "deterministic-consequence"),
       ];
     }
-    return [1, totalAfterAction / pacingTarget];
+    if (continuing) {
+      return [
+        outcomeComponent(
+          "pacing-state-rank",
+          continuationProbability > 0 ? 2 : 0,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "pacing-risk-rank",
+          continuationProbability >= threshold ? 2 : 1,
+          "zero-income-projection",
+        ),
+      ];
+    }
+    // P3b1 discrete-gate invariant: raw counter progress does not receive a
+    // fractional reward. An unmet pacing reference is simply not crossed.
+    return [
+      outcomeComponent("pacing-state-rank", 1, "deterministic-consequence"),
+      outcomeComponent("pacing-risk-rank", 0, "deterministic-consequence"),
+    ];
   };
+  const nextSectionComponents = (
+    readiness: CrossSectionReadinessResult | null,
+  ): HorizonOutcomeComponent[] => {
+    if (!readiness) return [];
+    const uncertainty: OutcomeUncertainty = {
+      kind: "monte-carlo",
+      couplingKey: crossSectionCouplingKey,
+    };
+    return [
+      outcomeComponent(
+        "next-section-completion-state",
+        readiness.checkpointState,
+        "zero-income-projection",
+        uncertainty,
+      ),
+      outcomeComponent(
+        "next-section-friendship10-probability",
+        readiness.effectiveFriendship10Probability,
+        "zero-income-projection",
+        uncertainty,
+      ),
+      outcomeComponent(
+        "next-section-target-probability",
+        readiness.targetProbability,
+        "zero-income-projection",
+        uncertainty,
+      ),
+      outcomeComponent(
+        "next-section-structural-purchases",
+        readiness.expectedStructuralPurchases,
+        "zero-income-projection",
+        uncertainty,
+      ),
+      outcomeComponent(
+        "next-section-purchases",
+        readiness.expectedPurchases,
+        "zero-income-projection",
+        uncertainty,
+      ),
+    ];
+  };
+  const resourceStateComponents = ({
+    retainedTokens,
+    visibleSongCost = 0,
+    futureTechniqueCost = 0,
+    fundingFeasibility,
+    retainedProvenance,
+    futureTechniqueUncertainty = { kind: "none" },
+  }: {
+    retainedTokens: number;
+    visibleSongCost?: number;
+    futureTechniqueCost?: number;
+    fundingFeasibility?: PhysicalFundingFeasibility;
+    retainedProvenance: "observed" | "deterministic-consequence" | "zero-income-projection";
+    futureTechniqueUncertainty?: OutcomeUncertainty;
+  }): HorizonOutcomeComponent[] => [
+    outcomeComponent("retained-tokens", retainedTokens, retainedProvenance),
+    outcomeComponent("visible-song-cost", visibleSongCost, "observed"),
+    outcomeComponent(
+      "future-technique-cost-expected",
+      futureTechniqueCost,
+      "zero-income-projection",
+      futureTechniqueUncertainty,
+    ),
+    ...(fundingFeasibility
+      ? TOKEN_KEYS.map((token) =>
+          outcomeComponent(
+            `immediate-funding-gap:${token}`,
+            fundingFeasibility.immediateFundingGap[token],
+            "observed",
+          ),
+        )
+      : []),
+  ];
 
   const physicalPageActions = enumeratePageActions({
     tokens,
@@ -671,12 +769,6 @@ export const analyzeSongSelection = (
       currentEffects,
       "friendship",
     );
-    const currentPracticeDecisionValue =
-      currentPracticeTrainingExposure > 0 || concertIndex === 4
-        ? currentPracticeTrainingExposure
-        : (song.practiceValue ?? 0);
-    const currentImmediateTrainingExposure =
-      currentPracticeDecisionValue + currentSpTrainingExposure;
     const immediateActivationPriority =
       currentIsChaseTarget ||
       (song.roles?.includes("friendship-10") === true &&
@@ -1042,7 +1134,7 @@ export const analyzeSongSelection = (
               techniqueMemo: crossSectionTechniqueMemo,
               // Common random numbers make STOP/buy/carry differences reflect
               // the state transition, not a different deterministic draw law.
-              seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
+              seedKey: crossSectionCouplingKey,
             })
           : null;
       diagnostics.crossSectionMs += nowMs() - crossSectionStartedAt;
@@ -1064,9 +1156,6 @@ export const analyzeSongSelection = (
                   (!finalGaugeHardActive || hardProbability >= threshold)))
             ? 1
             : 0;
-      const policyGreatSuccess = continuing
-        ? greatSuccessContinue
-        : greatSuccessStop;
       const effectiveCoverageAfter = abandonsHunt
         ? evaluatePageCoverage(
             retainedAfterLive,
@@ -1074,12 +1163,60 @@ export const analyzeSongSelection = (
             effectivePlanAfterPurchase,
           )
         : coverageAfter;
-      const horizonOutcome = createLegacyCompatibleHorizonOutcome({
+      const horizonExpectedPracticeStatDelta =
+        currentPracticeTrainingExposure +
+        (nextSectionReadiness?.expectedPracticeTrainingExposure ?? 0);
+      const horizonExpectedSkillPoints =
+        25 +
+        currentSpTrainingExposure +
+        (nextSectionReadiness
+          ? nextSectionReadiness.expectedSpTrainingExposure +
+            nextSectionReadiness.expectedLessonSkillPoints
+          : continuing
+            ? transitionAware.expectedLessonSkillPoints
+            : 0);
+      const horizonFriendshipExposure =
+        currentFriendshipTrainingExposure +
+        (nextSectionReadiness?.expectedFriendshipTrainingExposure ?? 0);
+      const horizonOutcome = createHorizonOutcome({
         tieId: `${song.id}:${action}`,
-        hard: affordable ? hardState : 0,
-        riskAdmissible: affordable ? riskState : 0,
-        prospective: [
-          ...activeHuntPrefix(
+        components: [
+          outcomeComponent(
+            "hard-state",
+            affordable ? hardState : 0,
+            "deterministic-consequence",
+          ),
+          outcomeComponent(
+            "risk-admissible-state",
+            affordable ? riskState : 0,
+            "zero-income-projection",
+          ),
+          outcomeComponent("structural-tier", tier, "deterministic-consequence"),
+          outcomeComponent(
+            "expected-practice-stat-delta",
+            horizonExpectedPracticeStatDelta,
+            "zero-income-projection",
+            nextSectionReadiness
+              ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
+              : { kind: "none" },
+          ),
+          outcomeComponent(
+            "expected-skill-points",
+            horizonExpectedSkillPoints,
+            "zero-income-projection",
+            nextSectionReadiness
+              ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
+              : { kind: "none" },
+          ),
+          outcomeComponent(
+            "friendship-exposure",
+            horizonFriendshipExposure,
+            "zero-income-projection",
+            nextSectionReadiness
+              ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
+              : { kind: "none" },
+          ),
+          ...activeHuntComponents(
             currentIsChaseTarget
               ? "acquired-now"
               : continuing && huntAbandonReason === null
@@ -1088,75 +1225,109 @@ export const analyzeSongSelection = (
             conditionalTarget,
             huntDecision,
           ),
-          ...pacingDecisionPrefix(
+          ...pacingDecisionComponents(
             totalAfterPurchase,
             continuing,
             pacingContinuationProbability,
           ),
-          immediateActivationPriority ? 1 : 0,
-          // A purchase that closes the current manual gauge realizes 35 stats
-          // now. Keep it ahead of noisy future projections, but behind a
-          // persistent structural activation such as Friendship +10.
-          intermediateGreatSuccessStatValue(greatSuccessStop),
-          ...(nextSectionReadiness?.decisionVector ?? []),
-        ],
-        structural: tier,
-        // P3a preserves this legacy banding exactly while keeping the raw
-        // exposure available for the semantic P3b1 migration.
-        certain: [
-          horizonValue(
-            "immediate-training-exposure",
-            currentImmediateTrainingExposure,
-            "floor-div-20",
+          outcomeComponent(
+            "immediate-activation-priority",
+            immediateActivationPriority ? 1 : 0,
+            "deterministic-consequence",
           ),
-          horizonValue(
-            "friendship-training-exposure",
-            currentFriendshipTrainingExposure,
-            "floor-div-20",
+          outcomeComponent(
+            "great-success-secured",
+            greatSuccessStop,
+            "deterministic-consequence",
           ),
-        ],
-        continuation: continuing
-          ? [
-              ...(finalGaugeHardActive ? [hardProbability] : []),
-              horizonValue(
-                "immediate-training-exposure",
-                currentImmediateTrainingExposure,
-              ),
-              horizonValue(
-                "friendship-training-exposure",
-                currentFriendshipTrainingExposure,
-              ),
-              25 + transitionAware.expectedLessonSkillPoints,
-              intermediateGreatSuccessStatValue(policyGreatSuccess),
-              conditionalTarget,
-              immediateTarget,
-              next.reachProbability,
-              continuationCoverage,
-            ]
-          : [
-              horizonValue(
-                "immediate-training-exposure",
-                currentImmediateTrainingExposure,
-              ),
-              horizonValue(
-                "friendship-training-exposure",
-                currentFriendshipTrainingExposure,
-              ),
-              25,
-              intermediateGreatSuccessStatValue(policyGreatSuccess),
-              currentIsOpportunity
+          ...(timingMode === "deadline-now" &&
+          concertIndex < 4 &&
+          continuing &&
+          greatSuccessStop === 0 &&
+          greatSuccessContinue !== null
+            ? [
+                outcomeComponent(
+                  "great-success-zero-income-reach",
+                  greatSuccessContinue,
+                  "zero-income-projection",
+                  { kind: "monte-carlo", couplingKey: transitionSeedKey },
+                ),
+              ]
+            : []),
+          ...nextSectionComponents(nextSectionReadiness),
+          ...(finalGaugeHardActive
+            ? [
+                outcomeComponent(
+                  "final-gauge-zero-income-reach",
+                  continuing ? hardProbability : greatSuccessStop,
+                  continuing
+                    ? "zero-income-projection"
+                    : "deterministic-consequence",
+                ),
+              ]
+            : []),
+          outcomeComponent(
+            "current-target-probability",
+            continuing
+              ? conditionalTarget
+              : currentIsOpportunity
                 ? 1
                 : effectiveCoverageAfter.planTargetProbability,
-              effectiveCoverageAfter.anyAffordableProbability,
-              effectiveCoverageAfter.bestStructuralTier,
-              0,
-            ],
-        retainedTokens: continuing
-          ? totalCost(retainedAfterLive) - transitionAware.expectedCommittedCost
-          : totalCost(retainedAfterLive),
-        committedCost:
-          totalCost(song.cost) +
-          (continuing ? transitionAware.expectedCommittedCost : 0),
+            continuing
+              ? "zero-income-projection"
+              : "deterministic-consequence",
+          ),
+          outcomeComponent(
+            "immediate-target-probability",
+            continuing ? immediateTarget : 0,
+            continuing
+              ? "zero-income-projection"
+              : "deterministic-consequence",
+          ),
+          outcomeComponent(
+            "current-any-affordable-probability",
+            continuing ? 0 : effectiveCoverageAfter.anyAffordableProbability,
+            "zero-income-projection",
+          ),
+          outcomeComponent(
+            "current-best-structural-tier",
+            continuing ? 0 : effectiveCoverageAfter.bestStructuralTier,
+            "zero-income-projection",
+          ),
+          outcomeComponent(
+            "carried-page-preserved",
+            0,
+            "deterministic-consequence",
+          ),
+          outcomeComponent(
+            "next-page-zero-income-reach",
+            continuing ? next.reachProbability : 0,
+            "zero-income-projection",
+            { kind: "monte-carlo", couplingKey: nextAnalysisSeedKey },
+          ),
+          outcomeComponent(
+            "continuation-coverage-probability",
+            continuing ? continuationCoverage : 0,
+            "zero-income-projection",
+          ),
+          ...resourceStateComponents({
+            retainedTokens: continuing
+              ? totalCost(retainedAfterLive) -
+                transitionAware.expectedCommittedCost
+              : totalCost(retainedAfterLive),
+            visibleSongCost: totalCost(song.cost),
+            futureTechniqueCost: continuing
+              ? transitionAware.expectedCommittedCost
+              : 0,
+            futureTechniqueUncertainty: continuing
+              ? { kind: "monte-carlo", couplingKey: transitionSeedKey }
+              : { kind: "none" },
+            fundingFeasibility,
+            retainedProvenance: continuing
+              ? "zero-income-projection"
+              : "deterministic-consequence",
+          }),
+        ],
       });
       const reasons: Message[] = [...baseReasons];
       if (abandonsHunt && huntAbandonReason) reasons.push(huntAbandonReason);
@@ -1271,7 +1442,7 @@ export const analyzeSongSelection = (
         huntAbandonReason: huntAbandonReason ?? undefined,
         huntDecision: huntDecision ?? undefined,
         horizonOutcome,
-        decisionVector: legacyDecisionVectorFromOutcome(horizonOutcome),
+        decisionVector: decisionVectorFromOutcome(horizonOutcome),
         nextSectionReadiness,
         valueOutcome: {
           lessonSkillPoints:
@@ -1388,34 +1559,87 @@ export const analyzeSongSelection = (
       friendshipSongMultiplier,
       trials: crossSectionTrialBudget,
       techniqueMemo: crossSectionTechniqueMemo,
-      seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
+      seedKey: crossSectionCouplingKey,
     });
     diagnostics.crossSectionMs += nowMs() - carryCrossStartedAt;
-    const carryHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+    const carryHorizonOutcome = createHorizonOutcome({
       tieId: `carry-page:${carriedPageSongIds.join(",")}`,
-      hard: 1,
-      riskAdmissible: 1,
-      prospective: [
-        ...activeHuntPrefix(visibleChaseTarget ? "carried" : "abandoned"),
-        ...pacingDecisionPrefix(totalSongs, false, 0),
-        0,
-        intermediateGreatSuccessStatValue(
-          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+      components: [
+        outcomeComponent("hard-state", 1, "deterministic-consequence"),
+        outcomeComponent(
+          "risk-admissible-state",
+          1,
+          "deterministic-consequence",
         ),
-        ...(carryNextSectionReadiness?.decisionVector ?? []),
-      ],
-      structural: bestVisibleTier,
-      continuation: [
-        visibleOpportunity ? 1 : carryCoverage.planTargetProbability,
-        carryCoverage.anyAffordableProbability,
-        carryCoverage.bestStructuralTier,
-        1,
-        intermediateGreatSuccessStatValue(
-          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+        outcomeComponent(
+          "structural-tier",
+          bestVisibleTier,
+          "deterministic-consequence",
         ),
+        outcomeComponent(
+          "expected-practice-stat-delta",
+          carryNextSectionReadiness?.expectedPracticeTrainingExposure ?? 0,
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        outcomeComponent(
+          "expected-skill-points",
+          (carryNextSectionReadiness?.expectedSpTrainingExposure ?? 0) +
+            (carryNextSectionReadiness?.expectedLessonSkillPoints ?? 0),
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        outcomeComponent(
+          "friendship-exposure",
+          carryNextSectionReadiness?.expectedFriendshipTrainingExposure ?? 0,
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        ...activeHuntComponents(
+          visibleChaseTarget ? "carried" : "abandoned",
+        ),
+        ...pacingDecisionComponents(totalSongs, false, 0),
+        outcomeComponent(
+          "immediate-activation-priority",
+          0,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "great-success-secured",
+          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+          "observed",
+        ),
+        ...nextSectionComponents(carryNextSectionReadiness),
+        outcomeComponent(
+          "current-target-probability",
+          visibleOpportunity ? 1 : carryCoverage.planTargetProbability,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "current-any-affordable-probability",
+          carryCoverage.anyAffordableProbability,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "current-best-structural-tier",
+          carryCoverage.bestStructuralTier,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "carried-page-preserved",
+          1,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "carry-without-opportunity-delay",
+          visibleOpportunity ? 0 : 1,
+          "deterministic-consequence",
+        ),
+        ...resourceStateComponents({
+          retainedTokens: totalCost(carryBalance),
+          retainedProvenance: "deterministic-consequence",
+        }),
       ],
-      retainedTokens: totalCost(carryBalance),
-      committedCost: 0,
     });
     policies.push({
       id: `carry-page:${carriedPageSongIds.join(",")}`,
@@ -1449,7 +1673,7 @@ export const analyzeSongSelection = (
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
       horizonOutcome: carryHorizonOutcome,
-      decisionVector: legacyDecisionVectorFromOutcome(carryHorizonOutcome),
+      decisionVector: decisionVectorFromOutcome(carryHorizonOutcome),
       nextSectionReadiness: carryNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1535,7 +1759,7 @@ export const analyzeSongSelection = (
       friendshipSongMultiplier,
       trials: crossSectionTrialBudget,
       techniqueMemo: crossSectionTechniqueMemo,
-      seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
+      seedKey: crossSectionCouplingKey,
     });
     if (stopNextSectionReadiness === null) {
       throw new Error(
@@ -1548,26 +1772,62 @@ export const analyzeSongSelection = (
       concertIndex,
     );
     const currentGreatSuccess = isGreatSuccess(concertIndex, songsThisSection);
-    const stopHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+    const stopHorizonOutcome = createHorizonOutcome({
       tieId: "stop-and-carry-stock",
-      hard: stopHardState,
-      riskAdmissible: stopHardState > 0 ? 1 : 0,
-      prospective: [
-        ...activeHuntPrefix("abandoned"),
-        ...pacingDecisionPrefix(totalSongs, false, 0),
-        0,
-        intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
-        ...stopNextSectionReadiness.decisionVector,
+      components: [
+        outcomeComponent(
+          "hard-state",
+          stopHardState,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "risk-admissible-state",
+          stopHardState > 0 ? 1 : 0,
+          "deterministic-consequence",
+        ),
+        outcomeComponent("structural-tier", 1, "deterministic-consequence"),
+        outcomeComponent(
+          "expected-practice-stat-delta",
+          stopNextSectionReadiness.expectedPracticeTrainingExposure,
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        outcomeComponent(
+          "expected-skill-points",
+          stopNextSectionReadiness.expectedSpTrainingExposure +
+            stopNextSectionReadiness.expectedLessonSkillPoints,
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        outcomeComponent(
+          "friendship-exposure",
+          stopNextSectionReadiness.expectedFriendshipTrainingExposure,
+          "zero-income-projection",
+          { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
+        ),
+        ...activeHuntComponents("abandoned"),
+        ...pacingDecisionComponents(totalSongs, false, 0),
+        outcomeComponent(
+          "immediate-activation-priority",
+          0,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "great-success-secured",
+          currentGreatSuccess ? 1 : 0,
+          "observed",
+        ),
+        ...nextSectionComponents(stopNextSectionReadiness),
+        outcomeComponent(
+          "carried-page-preserved",
+          0,
+          "deterministic-consequence",
+        ),
+        ...resourceStateComponents({
+          retainedTokens: totalCost(retainedAfterLive),
+          retainedProvenance: "deterministic-consequence",
+        }),
       ],
-      structural: 1,
-      continuation: [
-        0,
-        0,
-        0,
-        intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
-      ],
-      retainedTokens: totalCost(retainedAfterLive),
-      committedCost: 0,
     });
     policies.push({
       id: "stop-and-carry-stock",
@@ -1597,7 +1857,7 @@ export const analyzeSongSelection = (
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
       horizonOutcome: stopHorizonOutcome,
-      decisionVector: legacyDecisionVectorFromOutcome(stopHorizonOutcome),
+      decisionVector: decisionVectorFromOutcome(stopHorizonOutcome),
       nextSectionReadiness: stopNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1669,18 +1929,30 @@ export const analyzeSongSelection = (
     });
     const greatSuccessSecured = isGreatSuccess(4, songsThisSection);
     const gateSecured = finalGateSecured(totalSongs, songsThisSection);
-    const finalStopHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+    const finalStopHorizonOutcome = createHorizonOutcome({
       tieId: "stop-and-carry-stock",
-      // Once final Great Success is secured, STOP is no longer a privileged
-      // hard state: it competes normally with a remaining structural target.
-      // The raw 18-song count is intentionally absent from this decision.
-      hard: greatSuccessSecured ? 1 : 0,
-      riskAdmissible: greatSuccessSecured ? 1 : 0,
-      prospective: [0, 0],
-      structural: 0,
-      continuation: [0, 0, 0, 0],
-      retainedTokens: totalCost(tokens),
-      committedCost: 0,
+      components: [
+        outcomeComponent(
+          "hard-state",
+          greatSuccessSecured ? 1 : 0,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "risk-admissible-state",
+          greatSuccessSecured ? 1 : 0,
+          "deterministic-consequence",
+        ),
+        outcomeComponent("structural-tier", 0, "deterministic-consequence"),
+        outcomeComponent(
+          "great-success-secured",
+          greatSuccessSecured ? 1 : 0,
+          "observed",
+        ),
+        ...resourceStateComponents({
+          retainedTokens: totalCost(tokens),
+          retainedProvenance: "observed",
+        }),
+      ],
     });
     policies.push({
       id: "stop-and-carry-stock",
@@ -1704,7 +1976,7 @@ export const analyzeSongSelection = (
       continuationRecommendation: null,
       abandonsHunt: false,
       horizonOutcome: finalStopHorizonOutcome,
-      decisionVector: legacyDecisionVectorFromOutcome(finalStopHorizonOutcome),
+      decisionVector: decisionVectorFromOutcome(finalStopHorizonOutcome),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1740,28 +2012,6 @@ export const analyzeSongSelection = (
     const bestVisibleIsOpportunity =
       isChaseTarget(bestVisible, plan) ||
       isVisibleOptionalTarget(bestVisible, plan);
-    const bestVisibleEffects = acquiredEffectsForSong({
-      song: bestVisible,
-      concertIndex,
-      remainingTrainingsByFacility: remainingTrainings,
-      friendshipSongMultiplier,
-    });
-    const bestVisiblePracticeExposure = effectExposure(
-      bestVisibleEffects,
-      "practice",
-    );
-    const bestVisibleSpExposure = effectExposure(
-      bestVisibleEffects,
-      "sp-training",
-    );
-    const bestVisibleFriendshipExposure = effectExposure(
-      bestVisibleEffects,
-      "friendship",
-    );
-    const bestVisibleImmediateExposure =
-      (bestVisiblePracticeExposure > 0 || concertIndex === 4
-        ? bestVisiblePracticeExposure
-        : (bestVisible.practiceValue ?? 0)) + bestVisibleSpExposure;
     const currentCapacity = capacityFor(
       tokens,
       remainingSongs,
@@ -1805,6 +2055,15 @@ export const analyzeSongSelection = (
     const missing = missingTokens(tokens, bestVisible);
     const tier = structuralTier(bestVisible, plan);
     const bestVisibleAffordable = canAfford(tokens, bestVisible.cost);
+    const bestVisibleFundingGap = fundingGap(tokens, bestVisible.cost);
+    const bestVisibleFundingFeasibility: PhysicalFundingFeasibility = {
+      physicalAffordable: bestVisibleAffordable,
+      immediateFundingGap: bestVisibleFundingGap,
+      weightedFundingGap: weightedFundingGap(
+        bestVisibleFundingGap,
+        resourceEconomy.shadowPrices,
+      ),
+    };
     const reserveTargetsLostByPurchase = bestVisibleAffordable
       ? protectedReserveSongs.filter(
           (candidate) =>
@@ -1830,43 +2089,82 @@ export const analyzeSongSelection = (
           : plan.mode === "accumulate"
             ? { code: "reason.waitSameActivationNextLive" }
             : { code: "reason.waitProtectedReserveDominates" };
-    const waitHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+    const waitHorizonOutcome = createHorizonOutcome({
       tieId: `${bestVisible.id}:wait-reserve`,
-      hard: 1,
-      riskAdmissible: 1,
-      prospective: [
-        ...activeHuntPrefix(
+      components: [
+        outcomeComponent("hard-state", 1, "deterministic-consequence"),
+        outcomeComponent(
+          "risk-admissible-state",
+          1,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "structural-tier",
+          bestVisibleIsOpportunity && bestVisibleAffordable
+            ? Math.max(0, tier - 1)
+            : tier,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "expected-practice-stat-delta",
+          0,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "expected-skill-points",
+          0,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "friendship-exposure",
+          0,
+          "zero-income-projection",
+        ),
+        ...activeHuntComponents(
           waitAbandonsHunt ? "abandoned" : "preserved",
           coverage.planTargetProbability,
         ),
-        waitAbandonsHunt ? 2 : 0,
-      ],
-      structural:
-        bestVisibleIsOpportunity && canAfford(tokens, bestVisible.cost)
-          ? Math.max(0, tier - 1)
-          : tier,
-      // Waiting preserves the current page, so P3a keeps the exact legacy
-      // exposure banding while retaining the raw values for P3b1.
-      certain: [
-        horizonValue(
-          "immediate-training-exposure",
-          bestVisibleImmediateExposure,
-          "floor-div-20",
+        ...(waitAbandonsHunt
+          ? [
+              outcomeComponent(
+                "hunt-abandonment-without-purchase",
+                1,
+                "deterministic-consequence",
+              ),
+            ]
+          : []),
+        outcomeComponent(
+          "great-success-secured",
+          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+          "observed",
         ),
-        horizonValue(
-          "friendship-training-exposure",
-          bestVisibleFriendshipExposure,
-          "floor-div-20",
+        outcomeComponent(
+          "current-target-probability",
+          bestVisibleIsOpportunity ? 1 : coverage.planTargetProbability,
+          "zero-income-projection",
         ),
+        outcomeComponent(
+          "current-any-affordable-probability",
+          coverage.anyAffordableProbability,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "current-best-structural-tier",
+          coverage.bestStructuralTier,
+          "zero-income-projection",
+        ),
+        outcomeComponent(
+          "carried-page-preserved",
+          0,
+          "deterministic-consequence",
+        ),
+        ...resourceStateComponents({
+          retainedTokens: totalCost(tokens),
+          visibleSongCost: totalCost(bestVisible.cost),
+          fundingFeasibility: bestVisibleFundingFeasibility,
+          retainedProvenance: "observed",
+        }),
       ],
-      continuation: [
-        bestVisibleIsOpportunity ? 1 : coverage.planTargetProbability,
-        coverage.anyAffordableProbability,
-        coverage.bestStructuralTier,
-        0,
-      ],
-      retainedTokens: totalCost(tokens),
-      committedCost: 0,
     });
     policies.push({
       id: `${bestVisible.id}:wait-reserve`,
@@ -1902,7 +2200,7 @@ export const analyzeSongSelection = (
       huntAbandonReason: waitHuntAbandonReason,
       huntDecision: waitHuntDecision,
       horizonOutcome: waitHorizonOutcome,
-      decisionVector: legacyDecisionVectorFromOutcome(waitHorizonOutcome),
+      decisionVector: decisionVectorFromOutcome(waitHorizonOutcome),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,

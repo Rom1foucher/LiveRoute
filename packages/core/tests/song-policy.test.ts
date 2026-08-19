@@ -11,6 +11,7 @@ import { SONGS } from "../src/domain/song-data.ts";
 import { buildSolverStateContext } from "../src/solver/context.ts";
 import { analyzeSongSelection } from "../src/solver/song-policy.ts";
 import { createHuntState } from "../src/solver/hunt-state.ts";
+import { horizonMetricNumber } from "../src/solver/horizon-outcome.ts";
 import { compareDecisionVectors } from "../src/solver/value.ts";
 import { assessSongChoices } from "../src/diagnostics/decision-safety.ts";
 import { frAll, hasCode } from "./helpers/messages.ts";
@@ -1496,11 +1497,29 @@ test("replay run B s218 : sécuriser les 35 stats de Great Success bat le carry 
     continuationObjective: "priority-song",
   });
 
-  assert.equal(result.recommended?.songId, "ring-ring");
+  assert.equal(result.recommended?.songId, "kiseki");
   assert.ok(result.recommended?.action.startsWith("buy-"));
   assert.equal(result.recommended?.greatSuccessProbability, 1);
   assert.equal(result.recommended?.valueOutcome.greatSuccessStatGain, 35);
   assert.notEqual(result.recommended?.action, "carry-page");
+
+  const kiseki = result.policies.find(
+    (policy) => policy.id === "kiseki:buy-continue",
+  );
+  const ring = result.policies.find(
+    (policy) => policy.id === "ring-ring:buy-continue",
+  );
+  assert.ok(kiseki && ring);
+  assert.ok(
+    (horizonMetricNumber(
+      kiseki.horizonOutcome,
+      "expected-practice-stat-delta",
+    ) ?? 0) >
+      (horizonMetricNumber(
+        ring.horizonOutcome,
+        "expected-practice-stat-delta",
+      ) ?? 0),
+  );
 });
 
 test("replay pré-patch s5 : la chaîne C1 conserve toute sa valeur d'horizon", () => {
@@ -2056,8 +2075,14 @@ test("P4 : le classement filler de fin C4 est invariant entre 10/18 et 17/18", (
         guts.valueOutcome.practiceBonusValue,
     );
     assert.ok(
-      speed.decisionVector.continuation[0] >
-        guts.decisionVector.continuation[0],
+      (horizonMetricNumber(
+        speed.horizonOutcome,
+        "expected-practice-stat-delta",
+      ) ?? 0) >
+        (horizonMetricNumber(
+          guts.horizonOutcome,
+          "expected-practice-stat-delta",
+        ) ?? 0),
     );
   }
 });

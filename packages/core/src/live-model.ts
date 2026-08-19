@@ -756,8 +756,22 @@ export const acquiredEffectsForSong = ({
     remainingTrainingsByFacility,
   });
 
-  if (roles.includes("sp3-target") || roles.includes("sp2-target")) {
-    const magnitude = roles.includes("sp3-target") ? 3 : 2;
+  const skillPointTrainingMatch = song.practiceBonus?.match(
+    /^skill pts? training \+(\d+)/i,
+  );
+  if (
+    roles.includes("sp3-target") ||
+    roles.includes("sp2-target") ||
+    skillPointTrainingMatch
+  ) {
+    const magnitude = roles.includes("sp3-target")
+      ? 3
+      : roles.includes("sp2-target")
+        ? 2
+        : Math.max(
+            0,
+            Number.parseInt(skillPointTrainingMatch?.[1] ?? "0", 10),
+          );
     effects.push({
       kind: "sp-training",
       magnitude,
@@ -771,7 +785,7 @@ export const acquiredEffectsForSong = ({
     const dynamicPractice =
       /^(speed|stamina|power|guts|wisdom) training \+\d+/i.test(
         song.practiceBonus,
-      ) || /^skill pts? training \+\d+/i.test(song.practiceBonus);
+      );
     if (dynamicPractice) {
       const magnitude = parseTrainingMagnitude(song.practiceBonus);
       const value = remainingTrainingsByFacility
@@ -780,11 +794,7 @@ export const acquiredEffectsForSong = ({
             remainingTrainingsByFacility,
             friendshipSongMultiplier,
           )
-        : /^skill pts? training \+\d+/i.test(song.practiceBonus)
-          ? magnitude *
-            Math.max(1, friendshipSongMultiplier) *
-            practiceMoment.remainingTrainingOpportunities
-          : 0;
+        : 0;
       effects.push({
         kind: "practice",
         magnitude,

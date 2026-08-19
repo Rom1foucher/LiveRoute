@@ -105,16 +105,21 @@ cannot silently omit the local worker/WASM/language payload. Tesseract's
 JavaScript runtime is dynamically imported at the first OCR warm-up instead of
 joining the initial desktop bundle.
 
-## Solver outcome compatibility seam
+## Solver mechanical outcome boundary
 
-P3a introduces `HorizonOutcome` between song-policy consequence construction
-and the legacy `DecisionVector` comparator. The raw outcome and temporary
-legacy lane/transform metadata are separated so a later semantic migration can
-replace the comparator without changing physical projection code. See
+P3b1 makes `HorizonOutcome` the typed mechanical representation between
+song-policy consequence construction and decision ranking. Each semantic
+metric owns one global unit and transform; provenance and uncertainty travel
+with the value. Practice stat points, Skill Points, Friendship exposure and
+tokens therefore remain dimensionally distinct. See
 `docs/HORIZON_OUTCOME_V5.md`.
 
-The compatibility adapter is intentionally temporary and must be removed by
-P3b1; P3a itself is accepted only with an empty classified replay diff.
+The P3a compatibility projection is gone. A deliberately separate, temporary
+P3b1 decision bridge maps canonical metrics into the existing lexicographic
+`DecisionVector` ordering while P3b2 is still pending. Raw token balance and
+cost are telemetry/feasibility state and do not receive generic utility. P3b2
+must remove that ordering bridge without changing the mechanical metric
+contracts.
 
 ## Persistence and diagnostics
 

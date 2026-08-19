@@ -1,271 +1,215 @@
+import type { TokenKey } from "../live-model.ts";
 import type { DecisionVector } from "./value.ts";
 
 /**
- * Transitional P3a representation of a decision horizon.
+ * P3b1/T1a canonical representation of horizon consequences.
  *
- * `components` contains raw consequences only. `legacyProjection` is a
- * deliberately separate compatibility description that tells the temporary
- * adapter how the current DecisionVector was assembled. P3b1 can therefore
- * delete the projection and adapter without rewriting consequence production.
+ * Mechanical quantities are typed by unit and provenance. A MetricId owns one
+ * global unit and one global transform. The temporary P3b1 decision bridge is
+ * deliberately stored in a separate table so P3b2 can delete lexicographic
+ * ordering without changing mechanical outcome production.
  */
+export type OutcomeUnit =
+  | "stat-point"
+  | "skill-point"
+  | "friendship-pt-training"
+  | "token"
+  | "count"
+  | "probability";
+
+export type OutcomeProvenance =
+  | "observed"
+  | "deterministic-consequence"
+  | "zero-income-projection";
+
+export type OutcomeInterval = {
+  lower: number;
+  upper: number;
+};
+
+export type OutcomeUnknown = {
+  kind: "unknown";
+  source: string;
+};
+
+export type OutcomeValue = number | OutcomeInterval | OutcomeUnknown;
+
+export type OutcomeUncertainty =
+  | { kind: "none" }
+  | { kind: "monte-carlo"; couplingKey: string }
+  | { kind: "interval" }
+  | { kind: "calibration"; parameter: string }
+  | { kind: "unknown"; source: string };
+
+/**
+ * P3b1 keeps only transforms that are globally meaningful for one semantic
+ * metric. Action-specific transforms from the P3a compatibility layer are
+ * intentionally absent.
+ */
+export type TransformId = "identity" | "probability-band-5pct";
+
 export type HorizonMetricId =
   | "hard-state"
   | "risk-admissible-state"
   | "structural-tier"
-  | "immediate-training-exposure"
-  | "friendship-training-exposure"
+  | "expected-practice-stat-delta"
+  | "expected-skill-points"
+  | "friendship-exposure"
+  | "great-success-secured"
+  | "great-success-zero-income-reach"
+  | "hunt-state-rank"
+  | "hunt-target-probability"
+  | "hunt-abandonment-without-purchase"
+  | "pacing-state-rank"
+  | "pacing-risk-rank"
+  | "immediate-activation-priority"
+  | "next-section-completion-state"
+  | "next-section-friendship10-probability"
+  | "next-section-target-probability"
+  | "next-section-structural-purchases"
+  | "next-section-purchases"
+  | "current-target-probability"
+  | "immediate-target-probability"
+  | "current-any-affordable-probability"
+  | "current-best-structural-tier"
+  | "carried-page-preserved"
+  | "carry-without-opportunity-delay"
+  | "final-gauge-zero-income-reach"
+  | "next-page-zero-income-reach"
+  | "continuation-coverage-probability"
   | "retained-tokens"
-  | "committed-cost"
-  | `legacy-prospective:${number}`
-  | `legacy-continuation:${number}`
-  | `legacy-certain:${number}`;
+  | "visible-song-cost"
+  | "future-technique-cost-expected"
+  | `immediate-funding-gap:${TokenKey}`;
 
-/**
- * P3a compatibility transforms only. `floor-div-20` intentionally reproduces
- * the asymmetric BUY/WAIT legacy comparator. It must disappear with
- * legacyDecisionVectorFromOutcome in P3b1.
- */
-export type LegacyDecisionTransform = "identity" | "floor-div-20";
+type StaticHorizonMetricId = Exclude<
+  HorizonMetricId,
+  `immediate-funding-gap:${TokenKey}`
+>;
+
+type MechanicalMetricContract = {
+  unit: OutcomeUnit;
+  transform: TransformId;
+};
+
+const probabilityMetric = {
+  unit: "probability",
+  transform: "probability-band-5pct",
+} as const;
+const countMetric = { unit: "count", transform: "identity" } as const;
+const tokenMetric = { unit: "token", transform: "identity" } as const;
+
+const metricContracts = {
+  "hard-state": countMetric,
+  "risk-admissible-state": countMetric,
+  "structural-tier": countMetric,
+  "expected-practice-stat-delta": {
+    unit: "stat-point",
+    transform: "identity",
+  },
+  "expected-skill-points": { unit: "skill-point", transform: "identity" },
+  "friendship-exposure": {
+    unit: "friendship-pt-training",
+    transform: "identity",
+  },
+  "great-success-secured": countMetric,
+  "great-success-zero-income-reach": probabilityMetric,
+  "hunt-state-rank": countMetric,
+  "hunt-target-probability": probabilityMetric,
+  "hunt-abandonment-without-purchase": countMetric,
+  "pacing-state-rank": countMetric,
+  "pacing-risk-rank": countMetric,
+  "immediate-activation-priority": countMetric,
+  "next-section-completion-state": countMetric,
+  "next-section-friendship10-probability": probabilityMetric,
+  "next-section-target-probability": probabilityMetric,
+  "next-section-structural-purchases": countMetric,
+  "next-section-purchases": countMetric,
+  "current-target-probability": probabilityMetric,
+  "immediate-target-probability": probabilityMetric,
+  "current-any-affordable-probability": probabilityMetric,
+  "current-best-structural-tier": countMetric,
+  "carried-page-preserved": countMetric,
+  "carry-without-opportunity-delay": countMetric,
+  "final-gauge-zero-income-reach": probabilityMetric,
+  "next-page-zero-income-reach": probabilityMetric,
+  "continuation-coverage-probability": probabilityMetric,
+  "retained-tokens": tokenMetric,
+  "visible-song-cost": tokenMetric,
+  "future-technique-cost-expected": tokenMetric,
+} as const satisfies Record<StaticHorizonMetricId, MechanicalMetricContract>;
+
+const fundingGapContract: MechanicalMetricContract = tokenMetric;
+
+/** Mechanical contract only: decision placement is intentionally separate. */
+export const metricContract = (
+  metric: HorizonMetricId,
+): MechanicalMetricContract => {
+  if (metric.startsWith("immediate-funding-gap:")) return fundingGapContract;
+  const contract = metricContracts[metric as StaticHorizonMetricId];
+  if (!contract) throw new Error(`Unknown HorizonOutcome metric ${metric}`);
+  return contract;
+};
 
 export type HorizonOutcomeComponent = {
-  /** Stable within one outcome and used only to reference a raw component. */
-  id: string;
   metric: HorizonMetricId;
-  /** Raw consequence before any compatibility transform. */
-  value: number;
-};
-
-export type LegacyProjectionRef = {
-  componentId: string;
-  transform: LegacyDecisionTransform;
-};
-
-export type LegacyDecisionProjection = {
-  hard: LegacyProjectionRef;
-  riskAdmissible: LegacyProjectionRef;
-  structural: LegacyProjectionRef;
-  certain: readonly LegacyProjectionRef[];
-  prospective: readonly LegacyProjectionRef[];
-  continuation: readonly LegacyProjectionRef[];
-  retainedTokens: LegacyProjectionRef;
-  committedCost: LegacyProjectionRef;
+  value: OutcomeValue;
+  unit: OutcomeUnit;
+  provenance: OutcomeProvenance;
+  transform: TransformId;
+  uncertainty: OutcomeUncertainty;
 };
 
 export type HorizonOutcome = {
   tieId: string;
   components: readonly HorizonOutcomeComponent[];
-  /** P3a-only compatibility metadata. P3b1 must remove this field. */
-  legacyProjection: LegacyDecisionProjection;
 };
 
-export type HorizonValue = {
-  metric?: HorizonMetricId;
-  value: number;
-  legacyTransform?: LegacyDecisionTransform;
-};
-
-export const horizonValue = (
+export const outcomeComponent = (
   metric: HorizonMetricId,
-  value: number,
-  legacyTransform: LegacyDecisionTransform = "identity",
-): HorizonValue => ({ metric, value, legacyTransform });
-
-type LegacyCompatibleOutcomeInput = {
-  tieId: string;
-  hard: number | HorizonValue;
-  riskAdmissible: number | HorizonValue;
-  structural: number | HorizonValue;
-  certain?: readonly (number | HorizonValue)[];
-  prospective?: readonly (number | HorizonValue)[];
-  continuation: readonly (number | HorizonValue)[];
-  retainedTokens: number | HorizonValue;
-  committedCost: number | HorizonValue;
-};
-
-const defaultMetric = (
-  lane:
-    | "hard"
-    | "risk-admissible"
-    | "structural"
-    | "certain"
-    | "prospective"
-    | "continuation"
-    | "retained-tokens"
-    | "committed-cost",
-  index?: number,
-): HorizonMetricId => {
-  switch (lane) {
-    case "hard":
-      return "hard-state";
-    case "risk-admissible":
-      return "risk-admissible-state";
-    case "structural":
-      return "structural-tier";
-    case "retained-tokens":
-      return "retained-tokens";
-    case "committed-cost":
-      return "committed-cost";
-    case "certain":
-      return `legacy-certain:${index ?? 0}`;
-    case "prospective":
-      return `legacy-prospective:${index ?? 0}`;
-    case "continuation":
-      return `legacy-continuation:${index ?? 0}`;
-  }
-};
-
-/**
- * Build a raw outcome plus the exact legacy projection needed by P3a.
- *
- * Named raw metrics are deduplicated when the metric and value are identical.
- * This is important for values such as training exposure that legacy projects
- * into two lanes using different transforms: the consequence exists once;
- * only its legacy interpretation is duplicated.
- */
-export const createLegacyCompatibleHorizonOutcome = (
-  input: LegacyCompatibleOutcomeInput,
-): HorizonOutcome => {
-  const components: HorizonOutcomeComponent[] = [];
-  const componentBySemanticValue = new Map<string, HorizonOutcomeComponent>();
-  const usedIds = new Set<string>();
-
-  const uniqueId = (base: string): string => {
-    if (!usedIds.has(base)) {
-      usedIds.add(base);
-      return base;
-    }
-    let suffix = 2;
-    while (usedIds.has(`${base}#${suffix}`)) suffix += 1;
-    const id = `${base}#${suffix}`;
-    usedIds.add(id);
-    return id;
-  };
-
-  const project = (
-    lane:
-      | "hard"
-      | "risk-admissible"
-      | "structural"
-      | "certain"
-      | "prospective"
-      | "continuation"
-      | "retained-tokens"
-      | "committed-cost",
-    entry: number | HorizonValue,
-    index?: number,
-  ): LegacyProjectionRef => {
-    const value = typeof entry === "number" ? entry : entry.value;
-    const metric =
-      typeof entry === "number" || entry.metric === undefined
-        ? defaultMetric(lane, index)
-        : entry.metric;
-    const transform =
-      typeof entry === "number"
-        ? "identity"
-        : (entry.legacyTransform ?? "identity");
-
-    const semanticKey = `${metric}\u0000${Object.is(value, -0) ? "-0" : String(value)}`;
-    let component = componentBySemanticValue.get(semanticKey);
-    if (component === undefined) {
-      component = { id: uniqueId(metric), metric, value };
-      componentBySemanticValue.set(semanticKey, component);
-      components.push(component);
-    }
-    return { componentId: component.id, transform };
-  };
-
-  const vector = (
-    lane: "certain" | "prospective" | "continuation",
-    entries: readonly (number | HorizonValue)[],
-  ): readonly LegacyProjectionRef[] =>
-    entries.map((entry, index) => project(lane, entry, index));
-
+  value: OutcomeValue,
+  provenance: OutcomeProvenance,
+  uncertainty: OutcomeUncertainty = { kind: "none" },
+): HorizonOutcomeComponent => {
+  const contract = metricContract(metric);
   return {
-    tieId: input.tieId,
-    components,
-    legacyProjection: {
-      hard: project("hard", input.hard),
-      riskAdmissible: project("risk-admissible", input.riskAdmissible),
-      structural: project("structural", input.structural),
-      certain: vector("certain", input.certain ?? []),
-      prospective: vector("prospective", input.prospective ?? []),
-      continuation: vector("continuation", input.continuation),
-      retainedTokens: project("retained-tokens", input.retainedTokens),
-      committedCost: project("committed-cost", input.committedCost),
-    },
+    metric,
+    value,
+    unit: contract.unit,
+    provenance,
+    transform: contract.transform,
+    uncertainty,
   };
 };
 
-const applyLegacyTransform = (
-  value: number,
-  transform: LegacyDecisionTransform,
-): number => {
-  switch (transform) {
-    case "identity":
-      return value;
-    case "floor-div-20":
-      return Math.floor(value / 20);
-  }
-};
-
-const componentIndex = (
-  outcome: HorizonOutcome,
-): ReadonlyMap<string, HorizonOutcomeComponent> => {
-  const byId = new Map<string, HorizonOutcomeComponent>();
-  for (const component of outcome.components) {
-    if (byId.has(component.id)) {
+export const createHorizonOutcome = ({
+  tieId,
+  components,
+}: {
+  tieId: string;
+  components: readonly HorizonOutcomeComponent[];
+}): HorizonOutcome => {
+  const seen = new Set<HorizonMetricId>();
+  for (const component of components) {
+    if (seen.has(component.metric)) {
       throw new Error(
-        `HorizonOutcome ${outcome.tieId} contains duplicate component id ${component.id}`,
+        `HorizonOutcome ${tieId} contains duplicate metric ${component.metric}`,
       );
     }
-    byId.set(component.id, component);
+    seen.add(component.metric);
+    const contract = metricContract(component.metric);
+    if (component.unit !== contract.unit) {
+      throw new Error(
+        `HorizonOutcome metric ${component.metric} must use unit ${contract.unit}, got ${component.unit}`,
+      );
+    }
+    if (component.transform !== contract.transform) {
+      throw new Error(
+        `HorizonOutcome metric ${component.metric} must use transform ${contract.transform}, got ${component.transform}`,
+      );
+    }
   }
-  return byId;
-};
-
-const projectLegacyValue = (
-  outcome: HorizonOutcome,
-  byId: ReadonlyMap<string, HorizonOutcomeComponent>,
-  reference: LegacyProjectionRef,
-): number => {
-  const component = byId.get(reference.componentId);
-  if (component === undefined) {
-    throw new Error(
-      `HorizonOutcome ${outcome.tieId} references missing component ${reference.componentId}`,
-    );
-  }
-  return applyLegacyTransform(component.value, reference.transform);
-};
-
-/**
- * P3a-only compatibility seam. It is intentionally allowed to reproduce every
- * legacy asymmetry, including floor(exposure / 20) on the `certain` BUY/WAIT
- * lane. P3b1 must delete this adapter in the same commit that installs the
- * canonical metric transforms.
- */
-export const legacyDecisionVectorFromOutcome = (
-  outcome: HorizonOutcome,
-): DecisionVector => {
-  const byId = componentIndex(outcome);
-  const project = (reference: LegacyProjectionRef): number =>
-    projectLegacyValue(outcome, byId, reference);
-  const projectVector = (
-    references: readonly LegacyProjectionRef[],
-  ): number[] => references.map(project);
-  const certain = projectVector(outcome.legacyProjection.certain);
-  const prospective = projectVector(outcome.legacyProjection.prospective);
-
-  return {
-    hard: project(outcome.legacyProjection.hard),
-    riskAdmissible: project(outcome.legacyProjection.riskAdmissible),
-    structural: project(outcome.legacyProjection.structural),
-    certain: certain.length > 0 ? certain : undefined,
-    prospective: prospective.length > 0 ? prospective : undefined,
-    continuation: projectVector(outcome.legacyProjection.continuation),
-    retainedTokens: project(outcome.legacyProjection.retainedTokens),
-    committedCost: project(outcome.legacyProjection.committedCost),
-    tieId: outcome.tieId,
-  };
+  return { tieId, components: [...components] };
 };
 
 export const horizonMetricComponents = (
@@ -273,3 +217,205 @@ export const horizonMetricComponents = (
   metric: HorizonMetricId,
 ): readonly HorizonOutcomeComponent[] =>
   outcome.components.filter((component) => component.metric === metric);
+
+export const horizonMetricComponent = (
+  outcome: HorizonOutcome,
+  metric: HorizonMetricId,
+): HorizonOutcomeComponent | undefined =>
+  outcome.components.find((component) => component.metric === metric);
+
+export const horizonMetricNumber = (
+  outcome: HorizonOutcome,
+  metric: HorizonMetricId,
+): number | null => {
+  const value = horizonMetricComponent(outcome, metric)?.value;
+  return typeof value === "number" ? value : null;
+};
+
+/**
+ * Temporary P3b1 ordering only. This is not part of the mechanical contract and
+ * is expected to disappear when P3b2 introduces explicit utility.
+ */
+type DecisionBridgeLane =
+  | "hard"
+  | "risk-admissible"
+  | "structural"
+  | "certain"
+  | "prospective"
+  | "continuation";
+
+type DecisionBridgePosition = {
+  lane: DecisionBridgeLane;
+  order: number;
+};
+
+const p3b1DecisionBridge = {
+  "hard-state": { lane: "hard", order: 0 },
+  "risk-admissible-state": { lane: "risk-admissible", order: 0 },
+  "structural-tier": { lane: "structural", order: 0 },
+
+  // Discrete policy/gate state stays ahead of continuous projections. This
+  // preserves hard strategic ordering without assigning token utility.
+  "hunt-state-rank": { lane: "certain", order: 0 },
+  "hunt-abandonment-without-purchase": { lane: "certain", order: 1 },
+  "pacing-state-rank": { lane: "certain", order: 2 },
+  "pacing-risk-rank": { lane: "certain", order: 3 },
+  "immediate-activation-priority": { lane: "certain", order: 4 },
+  "great-success-secured": { lane: "certain", order: 5 },
+
+  "hunt-target-probability": { lane: "prospective", order: 0 },
+  "great-success-zero-income-reach": { lane: "prospective", order: 1 },
+  // Reaching the section objective is a discrete gate, not an exchange rate
+  // against projected stat or skill-point output.
+  "next-section-completion-state": { lane: "prospective", order: 2 },
+  "next-section-friendship10-probability": { lane: "prospective", order: 3 },
+  "next-section-target-probability": { lane: "prospective", order: 4 },
+  "expected-practice-stat-delta": { lane: "prospective", order: 5 },
+  // Carrying a non-opportunity page saves the inherited technique without
+  // postponing a target. Keep this explicit and below real stat yield.
+  "carry-without-opportunity-delay": { lane: "prospective", order: 6 },
+  "expected-skill-points": { lane: "prospective", order: 7 },
+  "friendship-exposure": { lane: "prospective", order: 8 },
+  "next-section-structural-purchases": { lane: "prospective", order: 9 },
+  "next-section-purchases": { lane: "prospective", order: 10 },
+
+  "final-gauge-zero-income-reach": { lane: "continuation", order: 0 },
+  "current-target-probability": { lane: "continuation", order: 1 },
+  "immediate-target-probability": { lane: "continuation", order: 2 },
+  "current-any-affordable-probability": { lane: "continuation", order: 3 },
+  "current-best-structural-tier": { lane: "continuation", order: 4 },
+  "next-page-zero-income-reach": { lane: "continuation", order: 5 },
+  "continuation-coverage-probability": { lane: "continuation", order: 6 },
+} as const satisfies Partial<Record<StaticHorizonMetricId, DecisionBridgePosition>>;
+
+const decisionBridgePosition = (
+  metric: HorizonMetricId,
+): DecisionBridgePosition | null =>
+  p3b1DecisionBridge[metric as keyof typeof p3b1DecisionBridge] ?? null;
+
+const probabilityBand = (value: number): number => Math.round(value / 0.05);
+
+const transformedNumber = (component: HorizonOutcomeComponent): number => {
+  if (typeof component.value !== "number") {
+    throw new Error(
+      `Decision metric ${component.metric} is not numerically separated in ${component.provenance}`,
+    );
+  }
+  switch (component.transform) {
+    case "identity":
+      return component.value;
+    case "probability-band-5pct":
+      return probabilityBand(component.value);
+  }
+};
+
+const metricsForLane = (
+  lane: "certain" | "prospective" | "continuation",
+): StaticHorizonMetricId[] =>
+  (Object.keys(p3b1DecisionBridge) as Array<
+    keyof typeof p3b1DecisionBridge
+  >)
+    .filter((metric) => p3b1DecisionBridge[metric].lane === lane)
+    .sort(
+      (left, right) =>
+        p3b1DecisionBridge[left].order - p3b1DecisionBridge[right].order,
+    );
+
+const decisionLaneValues = (
+  outcome: HorizonOutcome,
+  lane: "certain" | "prospective" | "continuation",
+): number[] => {
+  const byMetric = new Map(
+    outcome.components.map((component) => [component.metric, component]),
+  );
+  return metricsForLane(lane).map((metric) => {
+    const component = byMetric.get(metric);
+    return component ? transformedNumber(component) : 0;
+  });
+};
+
+const scalarDecisionMetric = (
+  outcome: HorizonOutcome,
+  lane: "hard" | "risk-admissible" | "structural",
+): number => {
+  const component = outcome.components.find(
+    (candidate) => decisionBridgePosition(candidate.metric)?.lane === lane,
+  );
+  return component ? transformedNumber(component) : 0;
+};
+
+/**
+ * Temporary T1a -> DecisionVector bridge.
+ *
+ * This is not the P3a compatibility adapter: actions no longer provide their
+ * own lanes or transforms. Mechanical MetricIds are canonical and this one
+ * removable table supplies only the interim lexicographic ordering. Token
+ * state is deliberately absent from the bridge, so retained balance and raw
+ * cost cannot become generic utility.
+ */
+export const decisionVectorFromOutcome = (
+  outcome: HorizonOutcome,
+): DecisionVector => {
+  const certain = decisionLaneValues(outcome, "certain");
+  const prospective = decisionLaneValues(outcome, "prospective");
+  const continuation = decisionLaneValues(outcome, "continuation");
+  return {
+    hard: scalarDecisionMetric(outcome, "hard"),
+    riskAdmissible: scalarDecisionMetric(outcome, "risk-admissible"),
+    structural: scalarDecisionMetric(outcome, "structural"),
+    certain: certain.length > 0 ? certain : undefined,
+    prospective: prospective.length > 0 ? prospective : undefined,
+    continuation,
+    retainedTokens: 0,
+    committedCost: 0,
+    tieId: outcome.tieId,
+  };
+};
+
+/** Build/test guards for P3b1 invariants 3, 5 and 6. */
+export const assertHorizonMetricContracts = (): void => {
+  for (const metric of Object.keys(metricContracts) as StaticHorizonMetricId[]) {
+    const contract = metricContract(metric);
+    if (contract.unit !== metricContracts[metric].unit) {
+      throw new Error(`Metric ${metric} has an unstable unit`);
+    }
+    if (contract.transform !== metricContracts[metric].transform) {
+      throw new Error(`Metric ${metric} has an unstable transform`);
+    }
+  }
+  for (const token of [
+    "dance",
+    "passion",
+    "vocal",
+    "visual",
+    "mental",
+  ] as const) {
+    const metric: HorizonMetricId = `immediate-funding-gap:${token}`;
+    const contract = metricContract(metric);
+    if (contract.unit !== "token" || contract.transform !== "identity") {
+      throw new Error(`Funding gap metric ${token} violates the token contract`);
+    }
+    if (decisionBridgePosition(metric) !== null) {
+      throw new Error(`Funding gap metric ${token} leaked into decision utility`);
+    }
+  }
+
+  for (const metric of [
+    "retained-tokens",
+    "visible-song-cost",
+    "future-technique-cost-expected",
+  ] as const) {
+    if (decisionBridgePosition(metric) !== null) {
+      throw new Error(`Token metric ${metric} leaked into decision utility`);
+    }
+  }
+
+  const positions = new Set<string>();
+  for (const [metric, position] of Object.entries(p3b1DecisionBridge)) {
+    const key = `${position.lane}:${position.order}`;
+    if (positions.has(key)) {
+      throw new Error(`Decision bridge position ${key} is duplicated at ${metric}`);
+    }
+    positions.add(key);
+  }
+};

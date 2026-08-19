@@ -4,6 +4,7 @@ import {
   acquiredEffectsForSong,
   contextualSongValues,
   effectExposure,
+  estimateRemainingTrainingsByFacility,
   type Balance,
   type SongTarget,
 } from "../src/live-model.ts";
@@ -67,6 +68,105 @@ test("PR-2 : SP Training est lui aussi horizon-aware", () => {
   assert.equal(effectExposure(sp3(2), "sp-training"), 66);
   assert.equal(effectExposure(sp3(3), "sp-training"), 45);
   assert.equal(effectExposure(sp3(4), "sp-training"), 0);
+});
+
+test("P3b1 : la table mécanique garde stats, Skill Points et Friendship dans trois unités", () => {
+  const remainingTrainingsByFacility =
+    estimateRemainingTrainingsByFacility("speed-wit", 0)!;
+  const exposures = ({
+    id,
+    practiceBonus,
+    roles = ["filler"],
+  }: {
+    id: string;
+    practiceBonus: string;
+    roles?: SongTarget["roles"];
+  }) => {
+    const effects = acquiredEffectsForSong({
+      song: {
+        id,
+        name: id,
+        cost: balance(),
+        roles,
+        priority: false,
+        utility: 0,
+        policyValue: 0,
+        practiceBonus,
+      },
+      concertIndex: 0,
+      remainingTrainingsByFacility,
+      friendshipSongMultiplier: 1.1,
+    });
+    return {
+      practice: Number(effectExposure(effects, "practice").toFixed(1)),
+      skillPoints: Number(effectExposure(effects, "sp-training").toFixed(1)),
+      friendship: Number(effectExposure(effects, "friendship").toFixed(1)),
+    };
+  };
+
+  assert.deepEqual(exposures({ id: "tachiichi", practiceBonus: "Speed training +1" }), {
+    practice: 41.8,
+    skillPoints: 0,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "go-this-way", practiceBonus: "Power training +1" }), {
+    practice: 29.7,
+    skillPoints: 0,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "kiseki", practiceBonus: "Wisdom training +1" }), {
+    practice: 16.5,
+    skillPoints: 0,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "ring-ring", practiceBonus: "Stamina training +1" }), {
+    practice: 7.7,
+    skillPoints: 0,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "nigekiri", practiceBonus: "Guts training +1" }), {
+    practice: 6.6,
+    skillPoints: 0,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "yume-wo-kakeru", practiceBonus: "Skill Pt training +2" }), {
+    practice: 0,
+    skillPoints: 99,
+    friendship: 0,
+  });
+  assert.deepEqual(exposures({ id: "grow-up-shine", practiceBonus: "Skill Pt training +3" }), {
+    practice: 0,
+    skillPoints: 148.5,
+    friendship: 0,
+  });
+  assert.deepEqual(
+    exposures({
+      id: "zensoku",
+      practiceBonus: "Speed +22",
+      roles: ["friendship-5"],
+    }),
+    { practice: 0, skillPoints: 0, friendship: 225 },
+  );
+});
+
+test("P3b1 : Skill Pt Training reste dimensionnel même sans rôle SP", () => {
+  const effects = acquiredEffectsForSong({
+    song: {
+      id: "roleless-sp",
+      name: "roleless-sp",
+      cost: balance(),
+      roles: ["filler"],
+      priority: false,
+      utility: 1,
+      policyValue: 0,
+      practiceBonus: "Skill Pt Training +3",
+    },
+    concertIndex: 3,
+  });
+
+  assert.equal(effectExposure(effects, "practice"), 0);
+  assert.equal(effectExposure(effects, "sp-training"), 45);
+  assert.deepEqual(effects.map((effect) => effect.kind), ["sp-training"]);
 });
 
 test("PR-2 : une Friendship achetée seulement au Grand Live reste acquise mais son exposition est nulle", () => {
