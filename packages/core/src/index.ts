@@ -24,6 +24,7 @@ export * from "./solver/context.ts";
 export * from "./solver/cross-section.ts";
 export * from "./solver/forced-override.ts";
 export * from "./solver/hunt-state.ts";
+export * from "./solver/horizon-outcome.ts";
 export * from "./solver/page-actions.ts";
 export * from "./solver/resource-economy.ts";
 export * from "./solver/song-dp.ts";

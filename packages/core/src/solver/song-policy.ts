@@ -49,11 +49,13 @@ import {
 } from "./page-actions.ts";
 import { evaluatePageCoverage, maximumAffordablePurchases } from "./song-dp.ts";
 import { assessCheckpointSupply } from "./supply-model.ts";
+import { compareDecisionVectors, riskThreshold } from "./value.ts";
 import {
-  compareDecisionVectors,
-  riskThreshold,
-  type DecisionVector,
-} from "./value.ts";
+  createLegacyCompatibleHorizonOutcome,
+  horizonValue,
+  legacyDecisionVectorFromOutcome,
+  type HorizonOutcome,
+} from "./horizon-outcome.ts";
 import { evaluateTransitionAwareSongPages } from "./song-transition.ts";
 import {
   alignHuntState,
@@ -140,7 +142,9 @@ export type SongPolicyEvaluation = {
   huntAbandonReason?: Message;
   /** PR-6 marginal HUNT vs HOLD comparison. */
   huntDecision?: HuntDecision;
-  decisionVector: DecisionVector;
+  /** P3a canonical consequence representation; legacy vector is derived from it. */
+  horizonOutcome: HorizonOutcome;
+  decisionVector: ReturnType<typeof legacyDecisionVectorFromOutcome>;
   nextSectionReadiness: CrossSectionReadinessResult | null;
   valueOutcome: SongValueOutcome;
   /** MC runs that materially informed this policy. Diagnostics only. */
@@ -1070,9 +1074,10 @@ export const analyzeSongSelection = (
             effectivePlanAfterPurchase,
           )
         : coverageAfter;
-      const decisionVector: DecisionVector = {
-        hard: hardState,
-        riskAdmissible: riskState,
+      const horizonOutcome = createLegacyCompatibleHorizonOutcome({
+        tieId: `${song.id}:${action}`,
+        hard: affordable ? hardState : 0,
+        riskAdmissible: affordable ? riskState : 0,
         prospective: [
           ...activeHuntPrefix(
             currentIsChaseTarget
@@ -1096,22 +1101,31 @@ export const analyzeSongSelection = (
           ...(nextSectionReadiness?.decisionVector ?? []),
         ],
         structural: tier,
-        // Guaranteed value on the page now. This is deliberately separated
-        // from prospective MC so a future 1-point expected-value wobble cannot
-        // make Guts +1 beat Speed +1 under a speed/wit profile.
+        // P3a preserves this legacy banding exactly while keeping the raw
+        // exposure available for the semantic P3b1 migration.
         certain: [
-          // Only material deterministic exposure differences outrank future
-          // projections. A 20-exposure band makes the replay's Speed +1 vs
-          // Guts +1 distinction visible without making every small stat
-          // preference dominate reserve economics.
-          Math.floor(currentImmediateTrainingExposure / 20),
-          Math.floor(currentFriendshipTrainingExposure / 20),
+          horizonValue(
+            "immediate-training-exposure",
+            currentImmediateTrainingExposure,
+            "floor-div-20",
+          ),
+          horizonValue(
+            "friendship-training-exposure",
+            currentFriendshipTrainingExposure,
+            "floor-div-20",
+          ),
         ],
         continuation: continuing
           ? [
               ...(finalGaugeHardActive ? [hardProbability] : []),
-              currentImmediateTrainingExposure,
-              currentFriendshipTrainingExposure,
+              horizonValue(
+                "immediate-training-exposure",
+                currentImmediateTrainingExposure,
+              ),
+              horizonValue(
+                "friendship-training-exposure",
+                currentFriendshipTrainingExposure,
+              ),
               25 + transitionAware.expectedLessonSkillPoints,
               intermediateGreatSuccessStatValue(policyGreatSuccess),
               conditionalTarget,
@@ -1120,8 +1134,14 @@ export const analyzeSongSelection = (
               continuationCoverage,
             ]
           : [
-              currentImmediateTrainingExposure,
-              currentFriendshipTrainingExposure,
+              horizonValue(
+                "immediate-training-exposure",
+                currentImmediateTrainingExposure,
+              ),
+              horizonValue(
+                "friendship-training-exposure",
+                currentFriendshipTrainingExposure,
+              ),
               25,
               intermediateGreatSuccessStatValue(policyGreatSuccess),
               currentIsOpportunity
@@ -1137,8 +1157,7 @@ export const analyzeSongSelection = (
         committedCost:
           totalCost(song.cost) +
           (continuing ? transitionAware.expectedCommittedCost : 0),
-        tieId: `${song.id}:${action}`,
-      };
+      });
       const reasons: Message[] = [...baseReasons];
       if (abandonsHunt && huntAbandonReason) reasons.push(huntAbandonReason);
       if (continuing && huntDecision?.action === "continue-hunt") {
@@ -1251,9 +1270,8 @@ export const analyzeSongSelection = (
         abandonsHunt,
         huntAbandonReason: huntAbandonReason ?? undefined,
         huntDecision: huntDecision ?? undefined,
-        decisionVector: affordable
-          ? decisionVector
-          : { ...decisionVector, hard: 0, riskAdmissible: 0 },
+        horizonOutcome,
+        decisionVector: legacyDecisionVectorFromOutcome(horizonOutcome),
         nextSectionReadiness,
         valueOutcome: {
           lessonSkillPoints:
@@ -1373,6 +1391,32 @@ export const analyzeSongSelection = (
       seedKey: `cross-section:${concertIndex}:${nextSongCycle}:terminal`,
     });
     diagnostics.crossSectionMs += nowMs() - carryCrossStartedAt;
+    const carryHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+      tieId: `carry-page:${carriedPageSongIds.join(",")}`,
+      hard: 1,
+      riskAdmissible: 1,
+      prospective: [
+        ...activeHuntPrefix(visibleChaseTarget ? "carried" : "abandoned"),
+        ...pacingDecisionPrefix(totalSongs, false, 0),
+        0,
+        intermediateGreatSuccessStatValue(
+          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+        ),
+        ...(carryNextSectionReadiness?.decisionVector ?? []),
+      ],
+      structural: bestVisibleTier,
+      continuation: [
+        visibleOpportunity ? 1 : carryCoverage.planTargetProbability,
+        carryCoverage.anyAffordableProbability,
+        carryCoverage.bestStructuralTier,
+        1,
+        intermediateGreatSuccessStatValue(
+          isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
+        ),
+      ],
+      retainedTokens: totalCost(carryBalance),
+      committedCost: 0,
+    });
     policies.push({
       id: `carry-page:${carriedPageSongIds.join(",")}`,
       action: "carry-page",
@@ -1404,32 +1448,8 @@ export const analyzeSongSelection = (
         plan.mode === "hunt" && !visibleChaseTarget
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
-      decisionVector: {
-        hard: 1,
-        riskAdmissible: 1,
-        prospective: [
-          ...activeHuntPrefix(visibleChaseTarget ? "carried" : "abandoned"),
-          ...pacingDecisionPrefix(totalSongs, false, 0),
-          0,
-          intermediateGreatSuccessStatValue(
-            isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
-          ),
-          ...(carryNextSectionReadiness?.decisionVector ?? []),
-        ],
-        structural: bestVisibleTier,
-        continuation: [
-          visibleOpportunity ? 1 : carryCoverage.planTargetProbability,
-          carryCoverage.anyAffordableProbability,
-          carryCoverage.bestStructuralTier,
-          1,
-          intermediateGreatSuccessStatValue(
-            isGreatSuccess(concertIndex, songsThisSection) ? 1 : 0,
-          ),
-        ],
-        retainedTokens: totalCost(carryBalance),
-        committedCost: 0,
-        tieId: `carry-page:${carriedPageSongIds.join(",")}`,
-      },
+      horizonOutcome: carryHorizonOutcome,
+      decisionVector: legacyDecisionVectorFromOutcome(carryHorizonOutcome),
       nextSectionReadiness: carryNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1528,6 +1548,27 @@ export const analyzeSongSelection = (
       concertIndex,
     );
     const currentGreatSuccess = isGreatSuccess(concertIndex, songsThisSection);
+    const stopHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+      tieId: "stop-and-carry-stock",
+      hard: stopHardState,
+      riskAdmissible: stopHardState > 0 ? 1 : 0,
+      prospective: [
+        ...activeHuntPrefix("abandoned"),
+        ...pacingDecisionPrefix(totalSongs, false, 0),
+        0,
+        intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
+        ...stopNextSectionReadiness.decisionVector,
+      ],
+      structural: 1,
+      continuation: [
+        0,
+        0,
+        0,
+        intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
+      ],
+      retainedTokens: totalCost(retainedAfterLive),
+      committedCost: 0,
+    });
     policies.push({
       id: "stop-and-carry-stock",
       action: "stop-and-carry-stock",
@@ -1555,27 +1596,8 @@ export const analyzeSongSelection = (
         plan.mode === "hunt"
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
-      decisionVector: {
-        hard: stopHardState,
-        riskAdmissible: stopHardState > 0 ? 1 : 0,
-        prospective: [
-          ...activeHuntPrefix("abandoned"),
-          ...pacingDecisionPrefix(totalSongs, false, 0),
-          0,
-          intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
-          ...stopNextSectionReadiness.decisionVector,
-        ],
-        structural: 1,
-        continuation: [
-          0,
-          0,
-          0,
-          intermediateGreatSuccessStatValue(currentGreatSuccess ? 1 : 0),
-        ],
-        retainedTokens: totalCost(retainedAfterLive),
-        committedCost: 0,
-        tieId: "stop-and-carry-stock",
-      },
+      horizonOutcome: stopHorizonOutcome,
+      decisionVector: legacyDecisionVectorFromOutcome(stopHorizonOutcome),
       nextSectionReadiness: stopNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1647,6 +1669,19 @@ export const analyzeSongSelection = (
     });
     const greatSuccessSecured = isGreatSuccess(4, songsThisSection);
     const gateSecured = finalGateSecured(totalSongs, songsThisSection);
+    const finalStopHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+      tieId: "stop-and-carry-stock",
+      // Once final Great Success is secured, STOP is no longer a privileged
+      // hard state: it competes normally with a remaining structural target.
+      // The raw 18-song count is intentionally absent from this decision.
+      hard: greatSuccessSecured ? 1 : 0,
+      riskAdmissible: greatSuccessSecured ? 1 : 0,
+      prospective: [0, 0],
+      structural: 0,
+      continuation: [0, 0, 0, 0],
+      retainedTokens: totalCost(tokens),
+      committedCost: 0,
+    });
     policies.push({
       id: "stop-and-carry-stock",
       action: "stop-and-carry-stock",
@@ -1668,19 +1703,8 @@ export const analyzeSongSelection = (
       criticalCost: 0,
       continuationRecommendation: null,
       abandonsHunt: false,
-      decisionVector: {
-        // Once final Great Success is secured, STOP is no longer a privileged
-        // hard state: it competes normally with a remaining structural target.
-        // The raw 18-song count is intentionally absent from this decision.
-        hard: greatSuccessSecured ? 1 : 0,
-        riskAdmissible: greatSuccessSecured ? 1 : 0,
-        prospective: [0, 0],
-        structural: 0,
-        continuation: [0, 0, 0, 0],
-        retainedTokens: totalCost(tokens),
-        committedCost: 0,
-        tieId: "stop-and-carry-stock",
-      },
+      horizonOutcome: finalStopHorizonOutcome,
+      decisionVector: legacyDecisionVectorFromOutcome(finalStopHorizonOutcome),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1806,6 +1830,44 @@ export const analyzeSongSelection = (
           : plan.mode === "accumulate"
             ? { code: "reason.waitSameActivationNextLive" }
             : { code: "reason.waitProtectedReserveDominates" };
+    const waitHorizonOutcome = createLegacyCompatibleHorizonOutcome({
+      tieId: `${bestVisible.id}:wait-reserve`,
+      hard: 1,
+      riskAdmissible: 1,
+      prospective: [
+        ...activeHuntPrefix(
+          waitAbandonsHunt ? "abandoned" : "preserved",
+          coverage.planTargetProbability,
+        ),
+        waitAbandonsHunt ? 2 : 0,
+      ],
+      structural:
+        bestVisibleIsOpportunity && canAfford(tokens, bestVisible.cost)
+          ? Math.max(0, tier - 1)
+          : tier,
+      // Waiting preserves the current page, so P3a keeps the exact legacy
+      // exposure banding while retaining the raw values for P3b1.
+      certain: [
+        horizonValue(
+          "immediate-training-exposure",
+          bestVisibleImmediateExposure,
+          "floor-div-20",
+        ),
+        horizonValue(
+          "friendship-training-exposure",
+          bestVisibleFriendshipExposure,
+          "floor-div-20",
+        ),
+      ],
+      continuation: [
+        bestVisibleIsOpportunity ? 1 : coverage.planTargetProbability,
+        coverage.anyAffordableProbability,
+        coverage.bestStructuralTier,
+        0,
+      ],
+      retainedTokens: totalCost(tokens),
+      committedCost: 0,
+    });
     policies.push({
       id: `${bestVisible.id}:wait-reserve`,
       action: "wait-reserve",
@@ -1839,37 +1901,8 @@ export const analyzeSongSelection = (
       abandonsHunt: waitAbandonsHunt,
       huntAbandonReason: waitHuntAbandonReason,
       huntDecision: waitHuntDecision,
-      decisionVector: {
-        hard: 1,
-        riskAdmissible: 1,
-        prospective: [
-          ...activeHuntPrefix(
-            waitAbandonsHunt ? "abandoned" : "preserved",
-            coverage.planTargetProbability,
-          ),
-          waitAbandonsHunt ? 2 : 0,
-        ],
-        structural:
-          bestVisibleIsOpportunity && canAfford(tokens, bestVisible.cost)
-            ? Math.max(0, tier - 1)
-            : tier,
-        // Waiting preserves the current page, so it retains the same certain
-        // visible-song option value while allowing reserve/future criteria to
-        // decide whether buying now is actually desirable.
-        certain: [
-          Math.floor(bestVisibleImmediateExposure / 20),
-          Math.floor(bestVisibleFriendshipExposure / 20),
-        ],
-        continuation: [
-          bestVisibleIsOpportunity ? 1 : coverage.planTargetProbability,
-          coverage.anyAffordableProbability,
-          coverage.bestStructuralTier,
-          0,
-        ],
-        retainedTokens: totalCost(tokens),
-        committedCost: 0,
-        tieId: `${bestVisible.id}:wait-reserve`,
-      },
+      horizonOutcome: waitHorizonOutcome,
+      decisionVector: legacyDecisionVectorFromOutcome(waitHorizonOutcome),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,

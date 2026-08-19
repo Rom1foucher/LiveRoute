@@ -105,6 +105,17 @@ cannot silently omit the local worker/WASM/language payload. Tesseract's
 JavaScript runtime is dynamically imported at the first OCR warm-up instead of
 joining the initial desktop bundle.
 
+## Solver outcome compatibility seam
+
+P3a introduces `HorizonOutcome` between song-policy consequence construction
+and the legacy `DecisionVector` comparator. The raw outcome and temporary
+legacy lane/transform metadata are separated so a later semantic migration can
+replace the comparator without changing physical projection code. See
+`docs/HORIZON_OUTCOME_V5.md`.
+
+The compatibility adapter is intentionally temporary and must be removed by
+P3b1; P3a itself is accepted only with an empty classified replay diff.
+
 ## Persistence and diagnostics
 
 The `DecisionSink` port isolates platform persistence:
