@@ -3,9 +3,12 @@ import test from "node:test";
 import { selectCarryoverPolicy } from "../src/domain/carryover-selection.ts";
 import {
   createHorizonOutcome,
-  decisionVectorFromOutcome,
   outcomeComponent,
 } from "../src/solver/horizon-outcome.ts";
+import {
+  decisionVectorFromUtilityAssessment,
+  utilityAssessmentFromOutcome,
+} from "../src/solver/utility-model.ts";
 import type { SongPolicyEvaluation } from "../src/solver/song-policy.ts";
 
 const policy = (
@@ -28,6 +31,7 @@ const policy = (
       outcomeComponent("structural-tier", 1, "deterministic-consequence"),
     ],
   });
+  const utilityAssessment = utilityAssessmentFromOutcome(horizonOutcome);
   return {
     id,
     action,
@@ -51,7 +55,8 @@ const policy = (
     continuationRecommendation: null,
     abandonsHunt: false,
     horizonOutcome,
-    decisionVector: decisionVectorFromOutcome(horizonOutcome),
+    utilityAssessment,
+    decisionVector: decisionVectorFromUtilityAssessment(utilityAssessment),
     nextSectionReadiness: null,
     valueOutcome: {
       lessonSkillPoints: 0,

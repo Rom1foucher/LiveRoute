@@ -49,22 +49,28 @@ import {
 } from "./page-actions.ts";
 import { evaluatePageCoverage, maximumAffordablePurchases } from "./song-dp.ts";
 import { assessCheckpointSupply } from "./supply-model.ts";
-import { compareDecisionVectors, riskThreshold } from "./value.ts";
+import { riskThreshold } from "./value.ts";
 import {
   createHorizonOutcome,
-  decisionVectorFromOutcome,
   outcomeComponent,
   type HorizonOutcome,
   type HorizonOutcomeComponent,
   type OutcomeUncertainty,
 } from "./horizon-outcome.ts";
+import {
+  compareUtilityAssessments,
+  decisionVectorFromUtilityAssessment,
+  utilityAssessmentFromOutcome,
+  utilityBreakpointsBetween,
+  type UtilityAssessment,
+  type UtilityBreakpoint,
+} from "./utility-model.ts";
 import { evaluateTransitionAwareSongPages } from "./song-transition.ts";
 import {
   alignHuntState,
   createHuntState,
   evaluateHuntDecision,
   observeHuntPage,
-  shadowPremiumForCost,
   type HuntDecision,
   type HuntState,
 } from "./hunt-state.ts";
@@ -144,9 +150,11 @@ export type SongPolicyEvaluation = {
   huntAbandonReason?: Message;
   /** PR-6 marginal HUNT vs HOLD comparison. */
   huntDecision?: HuntDecision;
-  /** P3b1 canonical typed consequences; the temporary vector bridge is derived globally by MetricId. */
+  /** T1a canonical typed consequences. */
   horizonOutcome: HorizonOutcome;
-  decisionVector: ReturnType<typeof decisionVectorFromOutcome>;
+  /** T1b stat-point utility derived from the same outcome. */
+  utilityAssessment: UtilityAssessment;
+  decisionVector: ReturnType<typeof decisionVectorFromUtilityAssessment>;
   nextSectionReadiness: CrossSectionReadinessResult | null;
   valueOutcome: SongValueOutcome;
   /** MC runs that materially informed this policy. Diagnostics only. */
@@ -200,6 +208,10 @@ export type SongPolicyDiagnostics = {
 export type SongPolicyResult = {
   recommended: SongPolicyEvaluation | null;
   safeAlternative: SongPolicyEvaluation | null;
+  utilityRobustness: {
+    comparedTo: string | null;
+    breakpoints: readonly UtilityBreakpoint[];
+  };
   policies: SongPolicyEvaluation[];
   tokenPressure: TokenPressure[];
   tokenReservePlan: TokenReservePlan;
@@ -666,6 +678,48 @@ export const analyzeSongSelection = (
       ),
     ];
   };
+  const gateUtilityComponents = (
+    songsNow: number,
+    readiness: CrossSectionReadinessResult | null = null,
+  ): HorizonOutcomeComponent[] => {
+    const uncertainty: OutcomeUncertainty = readiness
+      ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
+      : { kind: "none" };
+    const components: HorizonOutcomeComponent[] = [
+      outcomeComponent(
+        "gate16-crossed",
+        songsNow >= 16 ? 1 : 0,
+        "deterministic-consequence",
+      ),
+      outcomeComponent(
+        "gate18-crossed",
+        songsNow >= 18 ? 1 : 0,
+        "deterministic-consequence",
+      ),
+    ];
+    if (songsNow < 16 && readiness && readiness.valueConcertIndex >= 3) {
+      components.push(
+        outcomeComponent(
+          "gate16-zero-income-reach",
+          readiness.gate16Probability,
+          "zero-income-projection",
+          uncertainty,
+        ),
+      );
+    }
+    if (songsNow < 18 && readiness && readiness.valueConcertIndex >= 4) {
+      components.push(
+        outcomeComponent(
+          "gate18-zero-income-reach",
+          readiness.gate18Probability,
+          "zero-income-projection",
+          uncertainty,
+        ),
+      );
+    }
+    return components;
+  };
+
   const resourceStateComponents = ({
     retainedTokens,
     visibleSongCost = 0,
@@ -1010,16 +1064,8 @@ export const analyzeSongSelection = (
         plan.mode === "hunt" && !currentIsChaseTarget && huntState
           ? evaluateHuntDecision({
               state: huntState,
-              riskProfile,
               findAndFundProbability: conditionalTarget,
-              targetTrainingExposure: huntTargetTrainingExposure,
-              expectedFutureCommittedCost:
-                transitionAware.expectedCommittedCost,
-              immediateFillerCost: continuing ? totalCost(song.cost) : 0,
-              reserveOpportunityCost: continuing
-                ? shadowPremiumForCost(song.cost, resourceEconomy.shadowPrices)
-                : 0,
-              techniquesToNextSong,
+              targetUtilityStatPoints: huntTargetTrainingExposure,
             })
           : null;
       const huntAbandonReason: Message | null =
@@ -1255,6 +1301,7 @@ export const analyzeSongSelection = (
               ]
             : []),
           ...nextSectionComponents(nextSectionReadiness),
+          ...gateUtilityComponents(totalAfterPurchase, nextSectionReadiness),
           ...(finalGaugeHardActive
             ? [
                 outcomeComponent(
@@ -1442,7 +1489,10 @@ export const analyzeSongSelection = (
         huntAbandonReason: huntAbandonReason ?? undefined,
         huntDecision: huntDecision ?? undefined,
         horizonOutcome,
-        decisionVector: decisionVectorFromOutcome(horizonOutcome),
+        utilityAssessment: utilityAssessmentFromOutcome(horizonOutcome),
+        decisionVector: decisionVectorFromUtilityAssessment(
+          utilityAssessmentFromOutcome(horizonOutcome),
+        ),
         nextSectionReadiness,
         valueOutcome: {
           lessonSkillPoints:
@@ -1635,7 +1685,8 @@ export const analyzeSongSelection = (
           visibleOpportunity ? 0 : 1,
           "deterministic-consequence",
         ),
-        ...resourceStateComponents({
+        ...gateUtilityComponents(totalSongs, null),
+          ...resourceStateComponents({
           retainedTokens: totalCost(carryBalance),
           retainedProvenance: "deterministic-consequence",
         }),
@@ -1673,7 +1724,10 @@ export const analyzeSongSelection = (
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
       horizonOutcome: carryHorizonOutcome,
-      decisionVector: decisionVectorFromOutcome(carryHorizonOutcome),
+      utilityAssessment: utilityAssessmentFromOutcome(carryHorizonOutcome),
+      decisionVector: decisionVectorFromUtilityAssessment(
+        utilityAssessmentFromOutcome(carryHorizonOutcome),
+      ),
       nextSectionReadiness: carryNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1823,7 +1877,8 @@ export const analyzeSongSelection = (
           0,
           "deterministic-consequence",
         ),
-        ...resourceStateComponents({
+        ...gateUtilityComponents(totalSongs, null),
+          ...resourceStateComponents({
           retainedTokens: totalCost(retainedAfterLive),
           retainedProvenance: "deterministic-consequence",
         }),
@@ -1857,7 +1912,10 @@ export const analyzeSongSelection = (
           ? { code: "reason.huntAbandonAtConcert" }
           : undefined,
       horizonOutcome: stopHorizonOutcome,
-      decisionVector: decisionVectorFromOutcome(stopHorizonOutcome),
+      utilityAssessment: utilityAssessmentFromOutcome(stopHorizonOutcome),
+      decisionVector: decisionVectorFromUtilityAssessment(
+        utilityAssessmentFromOutcome(stopHorizonOutcome),
+      ),
       nextSectionReadiness: stopNextSectionReadiness,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -1948,7 +2006,8 @@ export const analyzeSongSelection = (
           greatSuccessSecured ? 1 : 0,
           "observed",
         ),
-        ...resourceStateComponents({
+        ...gateUtilityComponents(totalSongs, null),
+          ...resourceStateComponents({
           retainedTokens: totalCost(tokens),
           retainedProvenance: "observed",
         }),
@@ -1976,7 +2035,10 @@ export const analyzeSongSelection = (
       continuationRecommendation: null,
       abandonsHunt: false,
       horizonOutcome: finalStopHorizonOutcome,
-      decisionVector: decisionVectorFromOutcome(finalStopHorizonOutcome),
+      utilityAssessment: utilityAssessmentFromOutcome(finalStopHorizonOutcome),
+      decisionVector: decisionVectorFromUtilityAssessment(
+        utilityAssessmentFromOutcome(finalStopHorizonOutcome),
+      ),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -2158,7 +2220,8 @@ export const analyzeSongSelection = (
           0,
           "deterministic-consequence",
         ),
-        ...resourceStateComponents({
+        ...gateUtilityComponents(totalSongs, null),
+          ...resourceStateComponents({
           retainedTokens: totalCost(tokens),
           visibleSongCost: totalCost(bestVisible.cost),
           fundingFeasibility: bestVisibleFundingFeasibility,
@@ -2200,7 +2263,10 @@ export const analyzeSongSelection = (
       huntAbandonReason: waitHuntAbandonReason,
       huntDecision: waitHuntDecision,
       horizonOutcome: waitHorizonOutcome,
-      decisionVector: decisionVectorFromOutcome(waitHorizonOutcome),
+      utilityAssessment: utilityAssessmentFromOutcome(waitHorizonOutcome),
+      decisionVector: decisionVectorFromUtilityAssessment(
+        utilityAssessmentFromOutcome(waitHorizonOutcome),
+      ),
       nextSectionReadiness: null,
       valueOutcome: {
         lessonSkillPoints: 0,
@@ -2227,7 +2293,7 @@ export const analyzeSongSelection = (
   const ranked = policies
     .filter((policy) => policy.valid)
     .sort((left, right) =>
-      compareDecisionVectors(right.decisionVector, left.decisionVector),
+      compareUtilityAssessments(right.utilityAssessment, left.utilityAssessment),
     );
   ranked.forEach((policy, index) => {
     policy.score = (ranked.length - index) * 100;
@@ -2247,9 +2313,20 @@ export const analyzeSongSelection = (
           (recommended?.decisionVector.riskAdmissible ?? 0),
     ) ?? null;
 
+  const runnerUp = ranked.find((policy) => policy.id !== recommended?.id) ?? null;
   const result: SongPolicyResult = {
     recommended,
     safeAlternative,
+    utilityRobustness: {
+      comparedTo: runnerUp?.id ?? null,
+      breakpoints:
+        recommended && runnerUp
+          ? utilityBreakpointsBetween(
+              recommended.utilityAssessment,
+              runnerUp.utilityAssessment,
+            )
+          : [],
+    },
     policies,
     tokenPressure,
     tokenReservePlan,

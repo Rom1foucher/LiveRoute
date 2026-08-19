@@ -168,27 +168,29 @@ and cost. Spending can continue beyond 18 when it produces more immediate SP.
 
 ## Decision ordering
 
-Actions are compared lexicographically. Distinct value families are not added
-into one arbitrary universal score.
+Song-page decisions use the v5 T1a/T1b seam. Mechanical consequences are
+represented in `HorizonOutcome`; the utility transform then converts only named
+compatible quantities into the stat-point numeraire. Hard state and risk
+admission remain discrete gates ahead of utility.
 
-The shared `DecisionVector` uses this order:
+The utility model is `grand-live-stat-numeraire-v1` under projection policy
+`grand-live-zero-income-v1`. It uses:
 
-1. mechanical validity and deterministic hard constraints;
-2. admission under the selected risk profile;
-3. ordinal structural value of the visible song;
-4. material deterministic value available on the current page;
-5. costed prospective state and pacing debt;
-6. lexicographic continuation value;
-7. retained tokens;
-8. lower committed cost;
-9. stable candidate identifier.
+- practice-stat delta directly in stat points;
+- Lesson/training Skill Points through the explicit free `SKILL_POINT_UTILITY`;
+- Friendship training exposure through the bounded
+  `FRIENDSHIP_EXPOSURE_STAT_RATE`;
+- Great Success as the discrete 35-stat delta;
+- Gate 16/18 only when crossed or explicitly projected to their deadline.
 
-Current-page training exposure is deliberately materialised in coarse 20-unit
-bands. This makes a large deterministic distinction such as Speed +1 versus
-Guts +1 under a Speed/Wit profile visible before future Monte-Carlo noise, while
-small stat differences remain free to cede to reserve economics. Waiting on the
-current page retains this certain option value; carry to a later section does
-not pretend the bonus was activated now.
+not receive fractional gate utility. Retained tokens and committed token cost
+are mechanical state, not utility.
+
+The compatibility `DecisionVector` still exists because terminal-technique and
+durable diagnostics have not yet fully migrated. Song-policy vectors carry
+`utilityStatPoints`, which makes the legacy structural/prospective/token lanes
+non-decisional. Terminal C4 continues to use its legacy comparator and special
+opportunity-cost model until P5. See `docs/HORIZON_OUTCOME_V5.md`.
 
 Risk thresholds are:
 

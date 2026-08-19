@@ -66,43 +66,52 @@ test("PR-6 : coût technique et fillers sont persistés sans devenir un bonus de
   assert.equal(afterFiller?.fillerPurchasesWhileHunting, 1);
 });
 
-test("PR-6 : après le troisième miss, une cible rentable et peu coûteuse peut encore justifier HUNT", () => {
+test("P3b2 : après le troisième miss une cible à utilité positive peut encore justifier HUNT", () => {
   const state = {
     ...createHuntState(["SP3"]),
     pagesSeenWithoutTarget: 3,
   };
   const decision = evaluateHuntDecision({
     state,
-    riskProfile: "standard",
     findAndFundProbability: 0.6,
-    targetTrainingExposure: 90,
-    expectedFutureCommittedCost: 20,
-    immediateFillerCost: 0,
-    reserveOpportunityCost: 0,
-    techniquesToNextSong: 2,
+    targetUtilityStatPoints: 90,
   });
   assert.equal(decision.action, "continue-hunt");
-  assert.ok(decision.netValue > 0);
+  assert.equal(decision.expectedTargetValue, 54);
+  assert.equal(decision.netValue, 54);
 });
 
-test("PR-6 : après le troisième miss, un cycle profond à faible valeur bascule vers HOLD", () => {
+test("P3b2 : le coût, les fillers et la profondeur ne deviennent pas des pseudo-stat-points", () => {
   const state = {
     ...createHuntState(["SP3"]),
     pagesSeenWithoutTarget: 3,
-    fillerPurchasesWhileHunting: 1,
+    fillerPurchasesWhileHunting: 5,
+    committedTechniqueCost: cost(200, 200),
   };
   const decision = evaluateHuntDecision({
     state,
-    riskProfile: "standard",
     findAndFundProbability: 0.12,
-    targetTrainingExposure: 45,
-    expectedFutureCommittedCost: 140,
-    immediateFillerCost: 21,
-    reserveOpportunityCost: 6,
-    techniquesToNextSong: 5,
+    targetUtilityStatPoints: 45,
+  });
+  assert.equal(decision.action, "continue-hunt");
+  assert.ok(Math.abs(decision.netValue - 5.4) < 1e-9);
+  assert.equal(decision.missPenalty, 0);
+  assert.equal(decision.fillerPenalty, 0);
+  assert.equal(decision.cycleDepthPenalty, 0);
+});
+
+test("P3b2 : après le troisième miss un reach réellement nul permet HOLD", () => {
+  const state = {
+    ...createHuntState(["SP3"]),
+    pagesSeenWithoutTarget: 3,
+  };
+  const decision = evaluateHuntDecision({
+    state,
+    findAndFundProbability: 0,
+    targetUtilityStatPoints: 90,
   });
   assert.equal(decision.action, "abandon-to-hold");
-  assert.ok(decision.netValue < 0);
+  assert.equal(decision.netValue, 0);
 });
 
 test("PR-6 : changer de cible réinitialise l'état de chasse", () => {

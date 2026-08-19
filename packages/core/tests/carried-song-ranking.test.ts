@@ -205,7 +205,7 @@ test("P2 scarcityNormalisedCost est la fraction exacte du wallet sans +1 de liss
   );
 });
 
-test("P2 garde le delta de stats après tous les critères de coût", () => {
+test("P3b2 fait passer l utilité stat-point avant le fallback de coût P2", () => {
   const cheap = song("cheap", { dance: 20 });
   const expensiveStats = song(
     "expensive-stats",
@@ -224,7 +224,7 @@ test("P2 garde le delta de stats après tous les critères de coût", () => {
       purchasePointBalance: rich,
       remainingTrainingsByFacility,
     })?.song.id,
-    "cheap",
+    "expensive-stats",
   );
 });
 

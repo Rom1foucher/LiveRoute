@@ -72,7 +72,7 @@ test("la deuxième song manuelle sécurise Great Success en C1 et au Grand Live"
   }
 });
 
-test("C1 ne pousse pas une chaîne sans acquisition future finançable", () => {
+test("P3b2 : C1 peut préférer la valeur immédiate même si la continuation ne ferme pas Great Success", () => {
   const visible = song("seishun", { vocal: 32, mental: 12 }, [
     "specialty-priority",
   ]);
@@ -101,8 +101,8 @@ test("C1 ne pousse pas une chaîne sans acquisition future finançable", () => {
     (policy) => policy.id === "seishun:buy-continue",
   );
   assert.equal(forcedGreatSuccess?.greatSuccessProbability, 0);
-  assert.notEqual(result.recommended?.id, forcedGreatSuccess?.id);
-  assert.equal(result.recommended?.action, "carry-page");
+  assert.equal(result.recommended?.id, forcedGreatSuccess?.id);
+  assert.equal(result.recommended?.action, "buy-continue");
 });
 
 test("P4 : au Grand Live, Great Success puis conversion restent indépendants de 18", () => {
@@ -161,7 +161,7 @@ test("le crédit +10 vérifié peut rendre un carry faisable", () => {
   assert.match(frAll(result.recommended?.reasons ?? []), /\+10/);
 });
 
-test("un filler exposé peut être porté quand il ne retarde aucun bonus utile", () => {
+test("P3b2 : sans valeur future modélisée, un filler immédiat bat le carry purement économique", () => {
   const filler = song("filler", { dance: 21 }, ["filler"]);
   const result = analyzeSongSelection({
     period: "junior",
@@ -175,13 +175,8 @@ test("un filler exposé peut être porté quand il ne retarde aucun bonus utile"
     timingMode: "deadline-now",
     trials: 200,
   });
-  assert.equal(result.recommended?.action, "carry-page");
-  assert.ok(
-    hasCode(
-      result.recommended?.reasons ?? [],
-      "carry.savesOneInheritedTechnique",
-    ),
-  );
+  assert.equal(result.recommended?.action, "buy-stop");
+  assert.ok((result.recommended?.utilityAssessment.nominalStatPoints ?? 0) > 0);
 });
 
 test("une Friendship utile est activée avant le live plutôt que portée", () => {
@@ -451,7 +446,8 @@ test("CLOSE garde la Friendship visible devant un filler légèrement plus sûr"
     chosen.decisionVector.riskAdmissible,
   );
   assert.ok(
-    chosen.decisionVector.structural > filler.decisionVector.structural,
+    chosen.utilityAssessment.nominalStatPoints >
+      filler.utilityAssessment.nominalStatPoints,
   );
 });
 
@@ -720,7 +716,7 @@ test("le troisième achat terminal sécurise Great Success puis passe en HOLD", 
   assert.equal(result.recommended?.postPurchasePlanId, "hold");
 });
 
-test("WAIT_RESERVE explique la cible rendue inachetable, pas une fausse pénurie", () => {
+test("P3b2 : la réserve reste diagnostique et ne devient pas une utilité token implicite", () => {
   const visible = song("zensoku", { dance: 32, visual: 12 }, ["friendship-5"]);
   const sp2 = song("sp2-protected", { passion: 21, visual: 21 }, [
     "sp2-target",
@@ -744,15 +740,11 @@ test("WAIT_RESERVE explique la cible rendue inachetable, pas une fausse pénurie
     trials: 200,
   });
 
-  assert.equal(result.recommended?.action, "wait-reserve");
-  assert.equal(
-    result.recommended?.reasons.at(-2)?.code,
-    "reason.waitWouldBlockReserve",
-  );
-  assert.match(
-    frAll(result.recommended?.reasons ?? []),
-    /achat possible.*sp2-protected.*inachetable/,
-  );
+  assert.equal(result.recommended?.action, "buy-stop");
+  const wait = result.policies.find((policy) => policy.action === "wait-reserve");
+  assert.ok(wait);
+  assert.ok(hasCode(wait.reasons, "reason.waitWouldBlockReserve"));
+  assert.equal(wait.decisionVector.retainedTokens, 0);
 });
 
 const catalogTarget = (id: string): SongTarget => {
@@ -1034,7 +1026,7 @@ test("replay C4 : Fanfare +10 est recommandée sans faux blocage 16", () => {
   assert.equal(fanfare?.blocking, null);
 });
 
-test("le replay C3 cycle 4 du log abandonne HUNT sans acheter Komorebi", () => {
+test("P3b2 replay C3 cycle 4 : la profondeur passée ne pénalise plus Komorebi", () => {
   const remainingIds = [
     "tachiichi",
     "nigekiri",
@@ -1082,7 +1074,7 @@ test("le replay C3 cycle 4 du log abandonne HUNT sans acheter Komorebi", () => {
   });
 
   assert.equal(result.plan.id, "hunt-sp3");
-  assert.equal(result.recommended?.id, "nigekiri:wait-reserve");
+  assert.equal(result.recommended?.id, "komorebi:buy-stop");
   assert.equal(result.recommended?.abandonsHunt, true);
   assert.equal(
     result.recommended?.huntAbandonReason?.code,
@@ -1130,7 +1122,7 @@ test("PR-6 : après trois misses, une cible SP rentable et un cycle court peuven
   assert.equal(continuation?.valid, true);
 });
 
-test("HUNT abandonne avant un cycle à cinq techniques et persiste en HOLD", () => {
+test("P3b2 : un cycle à cinq techniques n est plus pénalisé par sa profondeur seule", () => {
   const filler = song("filler-abandon", { dance: 21 }, ["filler"]);
   const sp3 = song("SP3-abandon", { dance: 21, vocal: 21, mental: 21 }, [
     "sp3-target",
@@ -1154,23 +1146,17 @@ test("HUNT abandonne avant un cycle à cinq techniques et persiste en HOLD", () 
     trials: 300,
   });
   assert.equal(result.plan.mode, "hunt");
-  assert.equal(result.recommended?.action, "wait-reserve");
-  assert.equal(result.recommended?.abandonsHunt, true);
+  assert.equal(result.recommended?.action, "buy-stop");
+  assert.ok((result.recommended?.utilityAssessment.nominalStatPoints ?? 0) > 0);
   const continuation = result.policies.find(
     (policy) => policy.id === "filler-abandon:buy-continue",
   );
-  const stop = result.policies.find(
-    (policy) => policy.id === "filler-abandon:buy-stop",
-  );
-  assert.equal(continuation?.valid, false);
-  assert.equal(continuation?.overrideEligible, false);
-  assert.equal(continuation?.huntDecision?.action, "abandon-to-hold");
-  assert.match(frAll(continuation?.reasons ?? []), /valeur marginale/);
-  assert.equal(stop?.abandonsHunt, true);
-  assert.equal(stop?.postPurchasePlanId, "hold");
+  assert.ok(continuation);
+  assert.equal(continuation.huntDecision?.action, "continue-hunt");
+  assert.ok((continuation.huntDecision?.expectedTargetValue ?? 0) > 0);
 });
 
-test("HUNT applique le seuil probabiliste avant un cycle profond", () => {
+test("P3b2 : une faible probabilité reste valorisée par son utilité attendue sans pénalité de profondeur", () => {
   const filler = song("filler-low-probability", { dance: 21 }, ["filler"]);
   const sp3 = song(
     "SP3-low-probability",
@@ -1202,7 +1188,7 @@ test("HUNT applique le seuil probabiliste avant un cycle profond", () => {
     trials: 300,
   });
 
-  assert.equal(result.recommended?.action, "wait-reserve");
+  assert.equal(result.recommended?.action, "buy-stop");
   assert.equal(result.recommended?.abandonsHunt, true);
   assert.equal(
     result.recommended?.huntAbandonReason?.code,

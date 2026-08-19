@@ -13,8 +13,14 @@ import {
   structuralTier,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
+import {
+  FRIENDSHIP_EXPOSURE_STAT_RATE,
+  SKILL_POINT_UTILITY,
+} from "./utility-model.ts";
 
 export type CarriedSongRankMetrics = {
+  /** P3b2 nominal T1b utility. P2 cost metrics are fallback only. */
+  utilityStatPoints: number;
   target: 0 | 1;
   structuralTier: number;
   weightedCost: number;
@@ -79,6 +85,45 @@ const expectedPracticeStatDelta = ({
   );
 };
 
+
+const carriedSongUtilityStatPoints = ({
+  song,
+  remainingTrainingsByFacility,
+  friendshipSongMultiplier,
+}: {
+  song: SongTarget;
+  remainingTrainingsByFacility: RemainingTrainingsByFacility;
+  friendshipSongMultiplier: number;
+}): number => {
+  const practiceStats = expectedPracticeStatDelta({
+    song,
+    remainingTrainingsByFacility,
+    friendshipSongMultiplier,
+  });
+  const skillPointTraining =
+    song.practiceBonus && /^skill pts? training \+\d+/i.test(song.practiceBonus)
+      ? structuralTrainingValue(
+          song.practiceBonus,
+          remainingTrainingsByFacility,
+          friendshipSongMultiplier,
+        )
+      : 0;
+  const horizon = Object.values(remainingTrainingsByFacility).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
+  const friendshipMagnitude = song.roles?.includes("friendship-10")
+    ? 10
+    : song.roles?.includes("friendship-5")
+      ? 5
+      : 0;
+  return (
+    practiceStats +
+    (25 + skillPointTraining) * SKILL_POINT_UTILITY +
+    friendshipMagnitude * horizon * FRIENDSHIP_EXPOSURE_STAT_RATE
+  );
+};
+
 /**
  * P2 carried-page fallback metrics.
  *
@@ -106,6 +151,11 @@ export const carriedSongRankMetrics = ({
   }
 
   return {
+    utilityStatPoints: carriedSongUtilityStatPoints({
+      song,
+      remainingTrainingsByFacility,
+      friendshipSongMultiplier,
+    }),
     target: isChaseTarget(song, plan) ? 1 : 0,
     structuralTier: structuralTier(song, plan),
     weightedCost: weightedCost(song.cost, commonShadowPrices),
@@ -130,6 +180,7 @@ export const compareCarriedSongMetrics = (
   left: CarriedSongRankMetrics,
   right: CarriedSongRankMetrics,
 ): number =>
+  left.utilityStatPoints - right.utilityStatPoints ||
   left.target - right.target ||
   left.structuralTier - right.structuralTier ||
   right.weightedCost - left.weightedCost ||
@@ -138,8 +189,8 @@ export const compareCarriedSongMetrics = (
   left.expectedPracticeStatDelta - right.expectedPracticeStatDelta;
 
 /**
- * Selects one physically affordable song from a carried page using the P2
- * transitional fallback:
+ * Selects one physically affordable song from a carried page by T1b utility,
+ * then uses the P2 transitional chain only as an exact-utility fallback:
  * target -> structural tier -> weighted cost -> wallet-fraction cost -> raw
  * cost -> expected practice stat delta -> id.
  */

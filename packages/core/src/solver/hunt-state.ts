@@ -1,8 +1,6 @@
 import {
   TOKEN_KEYS,
   type Balance,
-  type RiskProfile,
-  type TokenShadowPrice,
 } from "../live-model.ts";
 
 export type HuntStatus = "active" | "abandoned" | "found";
@@ -163,134 +161,48 @@ export const markHuntStatus = (
 export const huntPageKey = (concertIndex: number, songCycle: number): string =>
   `${concertIndex}:${songCycle}`;
 
-export const shadowPremiumForCost = (
-  cost: Balance,
-  shadowPrices: readonly TokenShadowPrice[],
-): number => {
-  const shadowByKey = Object.fromEntries(
-    shadowPrices.map((item) => [item.key, Math.max(0, item.shadowValue)]),
-  ) as Partial<Record<(typeof TOKEN_KEYS)[number], number>>;
-  return TOKEN_KEYS.reduce(
-    (sum, key) => sum + Math.max(0, cost[key]) * (shadowByKey[key] ?? 0),
-    0,
-  );
-};
-
-const HUNT_VALUE_CALIBRATION = {
-  tokenCostWeight: {
-    safe: 0.22,
-    standard: 0.18,
-    greedy: 0.14,
-  } satisfies Record<RiskProfile, number>,
-  missPenalty: {
-    safe: 6,
-    standard: 4,
-    greedy: 3,
-  } satisfies Record<RiskProfile, number>,
-  fillerPenalty: {
-    safe: 3,
-    standard: 2,
-    greedy: 1.5,
-  } satisfies Record<RiskProfile, number>,
-  minimumProbability: {
-    safe: 0.08,
-    standard: 0.06,
-    greedy: 0.04,
-  } satisfies Record<RiskProfile, number>,
-  continuationMargin: {
-    safe: 2,
-    standard: 0,
-    greedy: -2,
-  } satisfies Record<RiskProfile, number>,
-  cycleDepthPenalty: 2,
-} as const;
-
 /**
- * PR-6 marginal comparison. Past technique spend is logged but deliberately
- * not subtracted again: it is a sunk cost. Misses/filler drift do matter as a
- * section-local opportunity penalty, while future cost and reserve pressure
- * are charged directly against the remaining SP-training exposure.
+ * T1b HUNT admission. Token spend and miss depth remain diagnostics only; they
+ * are never converted into pseudo stat-points. The projected target utility is
+ * already expressed in the common stat-point numeraire.
  */
 export const evaluateHuntDecision = ({
   state,
-  riskProfile,
   findAndFundProbability,
-  targetTrainingExposure,
-  expectedFutureCommittedCost,
-  immediateFillerCost,
-  reserveOpportunityCost,
-  techniquesToNextSong,
+  targetUtilityStatPoints,
 }: {
   state: HuntState;
-  riskProfile: RiskProfile;
   findAndFundProbability: number;
-  targetTrainingExposure: number;
-  expectedFutureCommittedCost: number;
-  immediateFillerCost: number;
-  reserveOpportunityCost: number;
-  techniquesToNextSong: number;
+  targetUtilityStatPoints: number;
 }): HuntDecision => {
-  const finiteNonNegative = (value: number): number =>
-    Number.isFinite(value) ? Math.max(0, value) : 0;
   const probability = Math.max(
     0,
-    Math.min(
-      1,
-      Number.isFinite(findAndFundProbability) ? findAndFundProbability : 0,
-    ),
+    Math.min(1, Number.isFinite(findAndFundProbability) ? findAndFundProbability : 0),
   );
-  const exposure = finiteNonNegative(targetTrainingExposure);
-  const expectedTargetValue = probability * exposure;
-  const expectedFutureCost =
-    (finiteNonNegative(expectedFutureCommittedCost) +
-      finiteNonNegative(immediateFillerCost)) *
-    HUNT_VALUE_CALIBRATION.tokenCostWeight[riskProfile];
-  // First two misses are ordinary HUNT variance. Starting with the third miss,
-  // continuation no longer receives an implicit structural free pass.
-  const missPenalty =
-    Math.max(0, state.pagesSeenWithoutTarget - 2) *
-    HUNT_VALUE_CALIBRATION.missPenalty[riskProfile];
-  const fillerPenalty =
-    Math.max(0, state.fillerPurchasesWhileHunting) *
-    HUNT_VALUE_CALIBRATION.fillerPenalty[riskProfile];
-  const cycleDepthPenalty =
-    Math.max(0, techniquesToNextSong - 3) *
-    HUNT_VALUE_CALIBRATION.cycleDepthPenalty;
-  const netValue =
-    expectedTargetValue -
-    expectedFutureCost -
-    finiteNonNegative(reserveOpportunityCost) -
-    missPenalty -
-    fillerPenalty -
-    cycleDepthPenalty;
-  const minimumProbability =
-    HUNT_VALUE_CALIBRATION.minimumProbability[riskProfile];
-  const continuationMargin =
-    HUNT_VALUE_CALIBRATION.continuationMargin[riskProfile];
+  const targetUtility = Number.isFinite(targetUtilityStatPoints)
+    ? Math.max(0, targetUtilityStatPoints)
+    : 0;
+  const expectedTargetValue = probability * targetUtility;
   const beforeThirdMiss = state.pagesSeenWithoutTarget < 3;
-  // Before the third miss, P(find & fund)=0 may only mean the current wallet
-  // cannot pay the target yet. Preserve HUNT so later training income can make
-  // the same target fundable; deeper hunts still use the calibrated threshold.
   const action =
     state.status === "active" &&
-    (beforeThirdMiss ||
-      (probability >= minimumProbability && netValue > continuationMargin))
+    (beforeThirdMiss || (probability > 0 && expectedTargetValue > 0))
       ? "continue-hunt"
       : "abandon-to-hold";
 
   return {
     action,
     findAndFundProbability: probability,
-    targetTrainingExposure: exposure,
+    targetTrainingExposure: targetUtility,
     expectedTargetValue,
-    expectedFutureCost,
-    reserveOpportunityCost: finiteNonNegative(reserveOpportunityCost),
-    missPenalty,
-    fillerPenalty,
-    cycleDepthPenalty,
-    netValue,
-    minimumProbability,
-    continuationMargin,
+    expectedFutureCost: 0,
+    reserveOpportunityCost: 0,
+    missPenalty: 0,
+    fillerPenalty: 0,
+    cycleDepthPenalty: 0,
+    netValue: expectedTargetValue,
+    minimumProbability: 0,
+    continuationMargin: 0,
     pagesSeenWithoutTarget: state.pagesSeenWithoutTarget,
     fillerPurchasesWhileHunting: state.fillerPurchasesWhileHunting,
     committedTechniqueTokens: TOKEN_KEYS.reduce(

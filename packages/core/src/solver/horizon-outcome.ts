@@ -1,5 +1,4 @@
 import type { TokenKey } from "../live-model.ts";
-import type { DecisionVector } from "./value.ts";
 
 /**
  * P3b1/T1a canonical representation of horizon consequences.
@@ -57,6 +56,10 @@ export type HorizonMetricId =
   | "friendship-exposure"
   | "great-success-secured"
   | "great-success-zero-income-reach"
+  | "gate16-crossed"
+  | "gate16-zero-income-reach"
+  | "gate18-crossed"
+  | "gate18-zero-income-reach"
   | "hunt-state-rank"
   | "hunt-target-probability"
   | "hunt-abandonment-without-purchase"
@@ -114,6 +117,10 @@ const metricContracts = {
   },
   "great-success-secured": countMetric,
   "great-success-zero-income-reach": probabilityMetric,
+  "gate16-crossed": countMetric,
+  "gate16-zero-income-reach": probabilityMetric,
+  "gate18-crossed": countMetric,
+  "gate18-zero-income-reach": probabilityMetric,
   "hunt-state-rank": countMetric,
   "hunt-target-probability": probabilityMetric,
   "hunt-abandonment-without-purchase": countMetric,
@@ -232,147 +239,7 @@ export const horizonMetricNumber = (
   return typeof value === "number" ? value : null;
 };
 
-/**
- * Temporary P3b1 ordering only. This is not part of the mechanical contract and
- * is expected to disappear when P3b2 introduces explicit utility.
- */
-type DecisionBridgeLane =
-  | "hard"
-  | "risk-admissible"
-  | "structural"
-  | "certain"
-  | "prospective"
-  | "continuation";
-
-type DecisionBridgePosition = {
-  lane: DecisionBridgeLane;
-  order: number;
-};
-
-const p3b1DecisionBridge = {
-  "hard-state": { lane: "hard", order: 0 },
-  "risk-admissible-state": { lane: "risk-admissible", order: 0 },
-  "structural-tier": { lane: "structural", order: 0 },
-
-  // Discrete policy/gate state stays ahead of continuous projections. This
-  // preserves hard strategic ordering without assigning token utility.
-  "hunt-state-rank": { lane: "certain", order: 0 },
-  "hunt-abandonment-without-purchase": { lane: "certain", order: 1 },
-  "pacing-state-rank": { lane: "certain", order: 2 },
-  "pacing-risk-rank": { lane: "certain", order: 3 },
-  "immediate-activation-priority": { lane: "certain", order: 4 },
-  "great-success-secured": { lane: "certain", order: 5 },
-
-  "hunt-target-probability": { lane: "prospective", order: 0 },
-  "great-success-zero-income-reach": { lane: "prospective", order: 1 },
-  // Reaching the section objective is a discrete gate, not an exchange rate
-  // against projected stat or skill-point output.
-  "next-section-completion-state": { lane: "prospective", order: 2 },
-  "next-section-friendship10-probability": { lane: "prospective", order: 3 },
-  "next-section-target-probability": { lane: "prospective", order: 4 },
-  "expected-practice-stat-delta": { lane: "prospective", order: 5 },
-  // Carrying a non-opportunity page saves the inherited technique without
-  // postponing a target. Keep this explicit and below real stat yield.
-  "carry-without-opportunity-delay": { lane: "prospective", order: 6 },
-  "expected-skill-points": { lane: "prospective", order: 7 },
-  "friendship-exposure": { lane: "prospective", order: 8 },
-  "next-section-structural-purchases": { lane: "prospective", order: 9 },
-  "next-section-purchases": { lane: "prospective", order: 10 },
-
-  "final-gauge-zero-income-reach": { lane: "continuation", order: 0 },
-  "current-target-probability": { lane: "continuation", order: 1 },
-  "immediate-target-probability": { lane: "continuation", order: 2 },
-  "current-any-affordable-probability": { lane: "continuation", order: 3 },
-  "current-best-structural-tier": { lane: "continuation", order: 4 },
-  "next-page-zero-income-reach": { lane: "continuation", order: 5 },
-  "continuation-coverage-probability": { lane: "continuation", order: 6 },
-} as const satisfies Partial<Record<StaticHorizonMetricId, DecisionBridgePosition>>;
-
-const decisionBridgePosition = (
-  metric: HorizonMetricId,
-): DecisionBridgePosition | null =>
-  p3b1DecisionBridge[metric as keyof typeof p3b1DecisionBridge] ?? null;
-
-const probabilityBand = (value: number): number => Math.round(value / 0.05);
-
-const transformedNumber = (component: HorizonOutcomeComponent): number => {
-  if (typeof component.value !== "number") {
-    throw new Error(
-      `Decision metric ${component.metric} is not numerically separated in ${component.provenance}`,
-    );
-  }
-  switch (component.transform) {
-    case "identity":
-      return component.value;
-    case "probability-band-5pct":
-      return probabilityBand(component.value);
-  }
-};
-
-const metricsForLane = (
-  lane: "certain" | "prospective" | "continuation",
-): StaticHorizonMetricId[] =>
-  (Object.keys(p3b1DecisionBridge) as Array<
-    keyof typeof p3b1DecisionBridge
-  >)
-    .filter((metric) => p3b1DecisionBridge[metric].lane === lane)
-    .sort(
-      (left, right) =>
-        p3b1DecisionBridge[left].order - p3b1DecisionBridge[right].order,
-    );
-
-const decisionLaneValues = (
-  outcome: HorizonOutcome,
-  lane: "certain" | "prospective" | "continuation",
-): number[] => {
-  const byMetric = new Map(
-    outcome.components.map((component) => [component.metric, component]),
-  );
-  return metricsForLane(lane).map((metric) => {
-    const component = byMetric.get(metric);
-    return component ? transformedNumber(component) : 0;
-  });
-};
-
-const scalarDecisionMetric = (
-  outcome: HorizonOutcome,
-  lane: "hard" | "risk-admissible" | "structural",
-): number => {
-  const component = outcome.components.find(
-    (candidate) => decisionBridgePosition(candidate.metric)?.lane === lane,
-  );
-  return component ? transformedNumber(component) : 0;
-};
-
-/**
- * Temporary T1a -> DecisionVector bridge.
- *
- * This is not the P3a compatibility adapter: actions no longer provide their
- * own lanes or transforms. Mechanical MetricIds are canonical and this one
- * removable table supplies only the interim lexicographic ordering. Token
- * state is deliberately absent from the bridge, so retained balance and raw
- * cost cannot become generic utility.
- */
-export const decisionVectorFromOutcome = (
-  outcome: HorizonOutcome,
-): DecisionVector => {
-  const certain = decisionLaneValues(outcome, "certain");
-  const prospective = decisionLaneValues(outcome, "prospective");
-  const continuation = decisionLaneValues(outcome, "continuation");
-  return {
-    hard: scalarDecisionMetric(outcome, "hard"),
-    riskAdmissible: scalarDecisionMetric(outcome, "risk-admissible"),
-    structural: scalarDecisionMetric(outcome, "structural"),
-    certain: certain.length > 0 ? certain : undefined,
-    prospective: prospective.length > 0 ? prospective : undefined,
-    continuation,
-    retainedTokens: 0,
-    committedCost: 0,
-    tieId: outcome.tieId,
-  };
-};
-
-/** Build/test guards for P3b1 invariants 3, 5 and 6. */
+/** Build/test guards for T1a unit/transform invariants. */
 export const assertHorizonMetricContracts = (): void => {
   for (const metric of Object.keys(metricContracts) as StaticHorizonMetricId[]) {
     const contract = metricContract(metric);
@@ -395,27 +262,5 @@ export const assertHorizonMetricContracts = (): void => {
     if (contract.unit !== "token" || contract.transform !== "identity") {
       throw new Error(`Funding gap metric ${token} violates the token contract`);
     }
-    if (decisionBridgePosition(metric) !== null) {
-      throw new Error(`Funding gap metric ${token} leaked into decision utility`);
-    }
-  }
-
-  for (const metric of [
-    "retained-tokens",
-    "visible-song-cost",
-    "future-technique-cost-expected",
-  ] as const) {
-    if (decisionBridgePosition(metric) !== null) {
-      throw new Error(`Token metric ${metric} leaked into decision utility`);
-    }
-  }
-
-  const positions = new Set<string>();
-  for (const [metric, position] of Object.entries(p3b1DecisionBridge)) {
-    const key = `${position.lane}:${position.order}`;
-    if (positions.has(key)) {
-      throw new Error(`Decision bridge position ${key} is duplicated at ${metric}`);
-    }
-    positions.add(key);
   }
 };

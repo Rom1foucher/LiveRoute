@@ -125,6 +125,8 @@ export type CrossSectionReadinessResult = {
   checkpointProbability: number;
   checkpointState: 0 | 1 | 2;
   targetProbability: number;
+  gate16Probability: number;
+  gate18Probability: number;
   friendship10Probability: number;
   effectiveFriendship10Probability: number;
   expectedFriendshipBonus: number;
@@ -142,8 +144,6 @@ export type CrossSectionReadinessResult = {
   transitionTokenGain: 10;
   supplyScope: "verified-live-transition-no-training-income";
   trials: number;
-  /** Lexicographic continuation value, derived from the chained simulation. */
-  decisionVector: readonly number[];
 };
 
 const zeroBalance = (): Balance => ({
@@ -443,6 +443,8 @@ export const evaluateCrossSectionReadiness = (
   let currentSectionCompletions = 0;
   let checkpointSuccesses = 0;
   let targetSuccesses = 0;
+  let gate16Successes = 0;
+  let gate18Successes = 0;
   let friendship10Successes = 0;
   let effectiveFriendship10Successes = 0;
   let friendshipBonusTotal = 0;
@@ -589,6 +591,8 @@ export const evaluateCrossSectionReadiness = (
     if (immediateResult.targetAcquired && nextResult.targetAcquired) {
       targetSuccesses += 1;
     }
+    if (nextResult.totalSongs >= 16) gate16Successes += 1;
+    if (nextResult.totalSongs >= 18) gate18Successes += 1;
     if (
       input.activatedFriendship10 === true ||
       Boolean(currentResult?.friendship10Acquired) ||
@@ -646,6 +650,8 @@ export const evaluateCrossSectionReadiness = (
   const currentSectionCompletionProbability =
     currentSectionCompletions / denominator;
   const targetProbability = targetSuccesses / denominator;
+  const gate16Probability = gate16Successes / denominator;
+  const gate18Probability = gate18Successes / denominator;
   const friendship10Probability = friendship10Successes / denominator;
   const effectiveFriendship10Probability =
     effectiveFriendship10Successes / denominator;
@@ -662,6 +668,8 @@ export const evaluateCrossSectionReadiness = (
     checkpointProbability,
     checkpointState,
     targetProbability,
+    gate16Probability,
+    gate18Probability,
     friendship10Probability,
     effectiveFriendship10Probability,
     expectedFriendshipBonus,
@@ -679,24 +687,6 @@ export const evaluateCrossSectionReadiness = (
     transitionTokenGain: 10,
     supplyScope: "verified-live-transition-no-training-income",
     trials,
-    decisionVector: [
-      currentSectionCompletionProbability >= threshold
-        ? 2
-        : currentSectionCompletionProbability > 0
-          ? 1
-          : 0,
-      // 16/18 remain diagnostic while evaluating a Promotional-Live choice.
-      // Structural song quality and activation timing must not be pre-empted by
-      // a future raw song-count checkpoint.
-      effectiveFriendship10Probability,
-      expectedFriendshipTrainingExposure,
-      expectedSpTrainingExposure,
-      expectedPracticeTrainingExposure,
-      targetProbability,
-      expectedStructuralPurchases,
-      expectedLessonSkillPoints,
-      expectedPurchases,
-      expectedRetainedTokens,
-    ],
+
   };
 };

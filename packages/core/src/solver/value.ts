@@ -10,6 +10,8 @@ export type DecisionVector = {
   continuation: readonly number[];
   retainedTokens: number;
   committedCost: number;
+  /** T1b stat-point utility. When present on both sides, legacy lanes are ignored. */
+  utilityStatPoints?: number;
   tieId: string;
 };
 
@@ -73,9 +75,11 @@ export const compareDecisionVectors = (
 ): number =>
   compareNumber(left.hard, right.hard) ||
   compareNumber(left.riskAdmissible, right.riskAdmissible) ||
-  // Guaranteed visible-song role is known exactly and must not lose to a
-  // marginal future MC delta. This is a total lexicographic key, not a
-  // pairwise exception, so PR-7 permutation/transitivity guarantees remain.
+  (left.utilityStatPoints !== undefined && right.utilityStatPoints !== undefined
+    ? compareNumber(left.utilityStatPoints, right.utilityStatPoints) ||
+      (left.tieId === right.tieId ? 0 : left.tieId < right.tieId ? 1 : -1)
+    :
+  // Legacy path retained only for terminal-technique consumers until P5.
   compareNumber(left.structural, right.structural) ||
   compareVector(left.certain ?? [], right.certain ?? []) ||
   compareProspectiveVector(left.prospective ?? [], right.prospective ?? []) ||
@@ -84,7 +88,7 @@ export const compareDecisionVectors = (
   compareNumber(right.committedCost, left.committedCost) ||
   // Stable final order. A lower identifier wins so identical states never
   // depend on object insertion order or Monte-Carlo noise.
-  (left.tieId === right.tieId ? 0 : left.tieId < right.tieId ? 1 : -1);
+  (left.tieId === right.tieId ? 0 : left.tieId < right.tieId ? 1 : -1));
 
 export const riskThreshold = (
   profile: "safe" | "standard" | "greedy",

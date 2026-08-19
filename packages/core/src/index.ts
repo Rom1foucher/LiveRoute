@@ -33,6 +33,7 @@ export * from "./solver/song-transition.ts";
 export * from "./solver/supply-model.ts";
 export * from "./solver/technique-dp.ts";
 export * from "./solver/terminal-technique.ts";
+export * from "./solver/utility-model.ts";
 export * from "./solver/value.ts";
 
 export * from "./planner/strategic-plan.ts";

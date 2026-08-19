@@ -1,226 +1,195 @@
-# HorizonOutcome v5 — P3b1 mechanical outcome contract
+# HorizonOutcome v5 — T1a mechanics and T1b utility
 
-P3b1 is the semantic normalization step after the P3a iso-behavior seam. It
-removes action-specific legacy projections and makes the quantities used by the
-song solver explicit about **metric identity, unit, provenance, transform and
-uncertainty**.
+P3b2 completes the semantic migration started by P3a/P3b1 for the song solver.
+`HorizonOutcome` remains the typed **T1a mechanical outcome**, while ranking
+uses a separate **T1b utility assessment** with an explicit stat-point numeraire.
+The temporary P3b1 metric-to-vector bridge is deleted.
 
-P3b1 intentionally does **not** introduce the final utility model. P3b2 owns
-that calibration. Until then, a small decision bridge preserves the strategic
-lexicographic structure without putting ranking metadata into the mechanical
-schema.
+This phase does not generalize terminal C4 or the full paired Monte-Carlo
+co-recommendation policy. Those remain P5 and P4 respectively.
 
-## Pipeline after P3b1
+## Pipeline after P3b2
 
 ```text
-physical state / deterministic consequence / zero-income projection
-                         |
-                         v
-                  HorizonOutcome
-              typed mechanical components
-                         |
-                         +------------------------------+
-                         | temporary P3b1 decision      |
-                         | bridge: metric -> lane/order |
-                         v                              |
-                  DecisionVector <---------------------+
-                         |
-                         v
-              compareDecisionVectors()
+physical state
+    |
+    v
+HorizonOutcome (T1a)
+metric + value/interval + unit + provenance + transform + uncertainty
+    |
+    v
+grand-live-zero-income-v1
+    |
+    v
+utilityAssessmentFromOutcome() (T1b)
+stat-point numeraire + named calibration parameters
+    |
+    v
+hard/admissibility gates -> nominal utility -> deterministic tie id
 ```
 
-The important boundary is that the **mechanical contract** and the **temporary
-ranking order** are separate:
+A compatibility `DecisionVector` is still emitted for diagnostics and consumers
+that have not yet migrated, but when it contains `utilityStatPoints` its legacy
+lanes are not decision inputs. The terminal-technique path remains on the legacy
+vector until P5.
 
-- a `MetricId` owns one global `unit` and one global `transform`;
-- action code cannot choose a different transform for the same metric;
-- lane/order metadata is not part of an `OutcomeComponent`;
-- P3b2 can delete the decision bridge without changing consequence production.
+## T1a mechanical contract
 
-The five physical song-policy actions use the same representation:
+T1a owns units and provenance, not utility. Relevant mechanical families are:
 
-- `buy-stop`;
-- `buy-continue`;
-- `wait-reserve`;
-- `carry-page`;
-- `stop-and-carry-stock`.
-
-## Canonical component shape
-
-Each component records a semantic quantity rather than an opaque vector slot:
-
-```ts
-type OutcomeComponent = {
-  metric: MetricId;
-  value: number | Interval | Unknown;
-  unit:
-    | "stat-point"
-    | "skill-point"
-    | "friendship-pt-training"
-    | "token"
-    | "count"
-    | "probability";
-  provenance:
-    | "observed"
-    | "deterministic-consequence"
-    | "zero-income-projection";
-  transform: TransformId;
-  uncertainty:
-    | { kind: "none" }
-    | { kind: "monte-carlo"; couplingKey: string }
-    | { kind: "interval" }
-    | { kind: "calibration"; parameter: string }
-    | { kind: "unknown"; source: string };
-};
-```
-
-`createHorizonOutcome()` validates that a metric cannot silently change unit or
-transform between actions. Duplicate metrics in one outcome are rejected.
-
-## Dimensional rules
-
-P3b1 separates quantities that the legacy vector could accidentally combine:
-
-| Metric family | Unit | Typical provenance |
+| Metric | Unit | Provenance |
 | --- | --- | --- |
-| expected practice stat delta | `stat-point` | zero-income projection |
-| expected skill points | `skill-point` | zero-income projection |
-| Friendship training exposure | `friendship-pt-training` | zero-income projection |
-| Great Success / pacing / hunt state | `count` | observed or deterministic consequence |
-| gate reach / target reach | `probability` | zero-income projection |
-| immediate funding gaps | `token` | observed |
-| retained balance | `token` | observed |
-| visible song cost | `token` | deterministic consequence |
-| expected future technique cost | `token` | zero-income projection |
+| expected practice-stat delta | stat-point | zero-income projection |
+| expected Skill Points | skill-point | zero-income projection |
+| Friendship exposure | friendship-pt-training | zero-income projection |
+| Great Success crossed/reach | count / probability | deterministic or projected |
+| Gate 16/18 crossed/reach | count / probability | deterministic or projected |
+| funding gaps / retained tokens | token | observed/projected state |
 
-Unlike units are never added without a named exchange rate. In particular,
-practice stat output and Skill Points are separate components. The old combined
-"training exposure" quantity no longer exists.
+Tokens remain state only. They never receive a generic exchange rate into
+stat-point utility.
 
-`Skill Pt(s) Training +N` is classified structurally as `sp-training`, even if
-catalogue roles are absent or change. It cannot fall through to practice-stat
-exposure merely because role metadata is incomplete.
+Unknown and interval-valued mechanical outputs cannot silently scalarize to
+zero. A utility transform consumes only explicit numeric consequences.
 
-## One metric, one transform
+## T1b utility model
 
-P3b1 removes the P3a action-specific `floor(exposure / 20)` behavior. A raw
-practice-stat projection such as `41.8` is represented as `41.8 stat-point` and
-uses the same transform everywhere.
+The utility model identifier is:
 
-Probability metrics currently use one global 5 % band transform while the
-interim comparator remains lexicographic. This is a transitional decision
-transform, not a claim about final utility. P3b2 is responsible for replacing
-this bridge with explicit utility/robustness semantics.
+```text
+grand-live-stat-numeraire-v1
+```
 
-The P3a artifacts are deleted and guarded against reintroduction:
+The projection policy is:
 
-- `legacyDecisionVectorFromOutcome`;
-- `legacyProjection`;
-- `LegacyDecisionTransform`;
-- `createLegacyCompatibleHorizonOutcome`;
-- `floor-div-20`.
+```text
+grand-live-zero-income-v1
+```
 
-## Tokens are state, not utility
+### Mechanical / derived values
 
-`retained-tokens`, visible song cost and funding gaps remain observable
-mechanical state. They do **not** occupy a generic ranking lane and the interim
-`DecisionVector` receives zero retained-token and committed-cost utility from
-`HorizonOutcome`.
+```text
+STAT_POINT_UTILITY       = 1
+GREAT_SUCCESS_STAT_DELTA = 35
+GATE18_STAT_DELTA        = 50
+```
 
-Tokens matter only through concrete consequences such as affordability,
-funding gaps, reachable actions and discrete gates. This prevents a solver from
-preferring an otherwise worse action merely because it leaves a larger raw
-wallet.
+`expectedPracticeStatDelta` is already expressed in stat points and therefore
+uses coefficient 1 by construction.
 
-The P1′ per-color `zeroIncomeFundingGap` distribution remains the authoritative
-fundability diagnostic in `runAnalysis()`. `future-technique-cost-expected` in
-`HorizonOutcome` is explicitly expected-value telemetry with Monte-Carlo
-uncertainty; it is **not** a replacement for that distribution and is not used
-as generic utility.
+### Bounded calibration
+
+Friendship uses:
+
+```text
+FRIENDSHIP_EXPOSURE_STAT_RATE
+nominal = 0.52
+calibration interval = [0.30, 0.80]
+```
+
+The exposure itself remains `Friendship bonus point × generic remaining
+training`; the rainbow/stat conversion belongs entirely to the exchange rate.
+
+### Free parameters
+
+```text
+SKILL_POINT_UTILITY    = 1.0 nominal seed
+SCENARIO_SKILL_UTILITY = 0
+SCENARIO_EVENT_UTILITY = 0
+```
+
+These are explicit policy parameters, not hidden truth claims. In particular,
+`SKILL_POINT_UTILITY = 1` is a neutral seed for calibration rather than a value
+derived from the former mixed-unit comparator.
 
 ## Discrete gates
 
-P3b1 does not turn progress counters into fractional gate utility. A raw
-`counter / target` fraction is not used as a substitute for whether a gate is
-crossed or for the probability of crossing it under a zero-income projection.
+Great Success and the 16/18 gates are discrete rewards. Raw progress such as
+`15 / 18` is not converted into proportional utility.
 
-Gate-oriented metrics are named explicitly, for example:
+Gate 16 contributes only its named scenario-event residual when crossed or when
+a zero-income projection actually reaches its deadline. Gate 18 contributes the
+50-stat mechanical reward plus its named scenario-skill residual under the same
+condition.
 
-- `great-success-secured`;
-- `great-success-zero-income-reach`;
-- `final-gauge-zero-income-reach`;
-- `next-page-zero-income-reach`;
-- `next-section-completion-state`.
+If the rollout horizon does not reach a gate deadline, the reward is recorded as
+`not-projected`; that is distinct from a projected probability of exactly zero.
 
-Adding resources should intuitively not hurt a funding projection, but the
-current rollout kernel also contains policy and Monte-Carlo interactions.
-Therefore zero-income gate reach is documented as a **conservative estimate**,
-not as a mathematically proven lower bound. P3b1 makes no monotonic lower-bound
-claim that the existing kernel cannot guarantee.
+## HUNT
 
-## Uncertainty and coupling
+HUNT no longer owns a second utility model. Token cost, miss count, filler count
+and cycle depth remain diagnostics/state, but are not converted into pseudo
+stat-points. Admission uses the projected find-and-fund probability together
+with the target's T1b utility. A deep hunt is not made bad merely because it is
+deep.
 
-Projected cross-section values carry an explicit Monte-Carlo uncertainty with
-a shared `couplingKey`. Related action evaluations can therefore be recognized
-as originating from the same random experiment instead of being mistaken for
-independent certainty.
+## Carried-page song selection
 
-P3b1 records this structure but does not yet implement the final paired
-robustness comparison. Common-random-number semantics, confidence/robustness
-policy and calibration belong to P3b2.
+P2's resource-cost order is now a fallback only. A carried page is ranked first
+by nominal T1b utility. Only exact utility ties fall through to:
 
-## Deliberate semantic changes from P3a
+```text
+target
+-> structuralTier
+-> weightedCost
+-> scarcityNormalisedCost
+-> totalCost
+-> expectedPracticeStatDelta
+-> id
+```
 
-P3a had to preserve historical asymmetries exactly; P3b1 is the phase where
-those asymmetries are removed. Replay differences are therefore allowed but
-must be explainable mechanically.
+This preserves the P2 deterministic resource discriminator without allowing it
+to outrank a genuine stat-point utility difference.
 
-One regression fixture changes from `ring-ring` to `kiseki`: both alternatives
-secure the same Great Success gate, while the typed zero-income practice-stat
-projection for `kiseki` is larger. The former `ring-ring` preference depended
-on legacy vector ordering rather than on an explicit same-unit mechanical
-advantage.
+## Calibration sensitivity
 
-Carry behavior is kept explicit rather than restored through token utility.
-`carry-without-opportunity-delay` represents the specific structural benefit of
-preserving a non-opportunity page and its inherited technique when doing so does
-not postpone a visible target. `carried-page-preserved` itself remains telemetry.
+For a named parameter `w_k`, the fixed-projection breakpoint is:
 
-## P3b1 invariants
+```text
+w_k* = - sum(i != k, w_i * Delta x_i) / Delta x_k
+```
 
-1. Every `MetricId` has exactly one global unit and transform.
-2. No action supplies its own unit, transform or vector lane.
-3. Stat points, Skill Points, Friendship exposure and tokens are never summed
-   as if they were the same dimension.
-4. Retained tokens and raw token costs are state, never intrinsic utility.
-5. Discrete gates are represented as gates/reach probabilities, not normalized
-   progress counters.
-6. Zero-income projections state their provenance and uncertainty.
-7. The P3a compatibility adapter and transforms no longer exist in core source.
-8. `SongPolicyEvaluation.horizonOutcome` remains required for all five physical
-   action kinds.
+Breakpoints are reported with:
 
-## Temporary bridge and P3b2 deletion contract
+```text
+scope = fixed-projection-policy
+projectionPolicy = grand-live-zero-income-v1
+```
 
-`decisionVectorFromOutcome()` and its private `p3b1DecisionBridge` are deliberate
-transitional machinery. They map canonical metrics to the current comparator's
-lexicographic lanes **without** changing the mechanical contracts.
+Only decision-relevant values are retained:
 
-P3b2 must replace this bridge with explicit utility/robustness semantics. It
-must not reintroduce action-specific transforms, mixed-unit sums or intrinsic
-token value while doing so.
+- bounded parameters must cross inside their calibration interval;
+- free parameters must cross inside their non-negative policy domain;
+- calibration never claims to overturn a different hard/admissibility state.
 
-## Non-goals of P3b1
+## Monte-Carlo coupling boundary
 
-P3b1 does not:
+T1a keeps Monte-Carlo `couplingKey` metadata on related projections. P3b2 does
+not yet generalize confidence intervals, adaptive resampling, or
+co-recommendation. That remains P4.
 
-- calibrate stat points against Skill Points or Friendship exposure;
-- define the final scalar/lexicographic utility function;
-- prove Monte-Carlo monotonicity or confidence bounds;
-- replace P1′ funding-gap distributions with a scalar;
-- unify the separate terminal C4 economy;
-- fix the terminal `buy-continue` action-space divergence;
-- change terminal-technique ranking into the final outcome model.
+This separation is deliberate: a **calibration-sensitive** order and a
+**Monte-Carlo-not-separated** order require different remedies and must not be
+collapsed into one notion of uncertainty.
 
-Those changes belong to P3b2 and later phases in the frozen implementation
-order.
+## Compatibility boundary before P5
+
+`DecisionVector` remains in the public diagnostics surface for compatibility.
+Song-policy vectors now carry `utilityStatPoints`; when both compared vectors
+have that field, legacy structural/prospective/token lanes are ignored.
+
+The terminal-technique/C4 evaluator still uses the legacy vector and its
+special opportunity-cost economy. P3b2 does not change that path. P5 will unify
+its action space and remove the separate C4 economy.
+
+## P3b2 invariants
+
+1. T1a remains mechanical and ranking-free.
+2. Every cross-unit conversion is named in T1b.
+3. Stat points are the explicit numeraire.
+4. Great Success and 16/18 remain discrete gates.
+5. Raw progress below a gate receives no fractional reward.
+6. Tokens have no intrinsic utility.
+7. Unknown/interval mechanics cannot silently scalarize to zero.
+8. Breakpoints are conditional on the fixed projection policy.
+9. Full paired Monte-Carlo robustness remains outside P3b2.

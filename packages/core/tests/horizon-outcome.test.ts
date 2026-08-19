@@ -5,13 +5,17 @@ import type { Balance, SongTarget } from "../src/live-model.ts";
 import {
   assertHorizonMetricContracts,
   createHorizonOutcome,
-  decisionVectorFromOutcome,
   horizonMetricNumber,
   metricContract,
   outcomeComponent,
   type HorizonOutcomeComponent,
 } from "../src/solver/horizon-outcome.ts";
 import { analyzeSongSelection } from "../src/solver/song-policy.ts";
+import {
+  compareUtilityAssessments,
+  decisionVectorFromUtilityAssessment,
+  utilityAssessmentFromOutcome,
+} from "../src/solver/utility-model.ts";
 import { compareDecisionVectors } from "../src/solver/value.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
@@ -79,7 +83,7 @@ test("P3b1 rejects per-action unit or transform overrides", () => {
   );
 });
 
-test("P3b1 removes the BUY-only floor: raw stat deltas remain ordered", () => {
+test("P3b2 removes the BUY-only floor: raw stat deltas remain ordered", () => {
   const outcome = (tieId: string, value: number) =>
     createHorizonOutcome({
       tieId,
@@ -102,14 +106,14 @@ test("P3b1 removes the BUY-only floor: raw stat deltas remain ordered", () => {
 
   assert.equal(horizonMetricNumber(high, "expected-practice-stat-delta"), 41.8);
   assert.ok(
-    compareDecisionVectors(
-      decisionVectorFromOutcome(high),
-      decisionVectorFromOutcome(low),
+    compareUtilityAssessments(
+      utilityAssessmentFromOutcome(high),
+      utilityAssessmentFromOutcome(low),
     ) > 0,
   );
 });
 
-test("P3b1 records retained tokens as state without generic token utility", () => {
+test("P3b2 records retained tokens as state without generic token utility", () => {
   const outcome = (tokens: number) =>
     createHorizonOutcome({
       tieId: "same-action",
@@ -126,12 +130,12 @@ test("P3b1 records retained tokens as state without generic token utility", () =
     horizonMetricNumber(rich, "retained-tokens"),
   );
   assert.deepEqual(
-    decisionVectorFromOutcome(poor),
-    decisionVectorFromOutcome(rich),
+    utilityAssessmentFromOutcome(poor),
+    utilityAssessmentFromOutcome(rich),
   );
 });
 
-test("P3b1 all song actions expose the same HorizonOutcome decision seam", () => {
+test("P3b2 all song actions pass through the same T1a/T1b decision seam", () => {
   const visible = song("visible");
   const deadline = analyzeSongSelection({
     period: "junior",
@@ -182,8 +186,8 @@ test("P3b1 all song actions expose the same HorizonOutcome decision seam", () =>
     assert.ok(policy, `missing ${action}`);
     assert.deepEqual(
       policy.decisionVector,
-      decisionVectorFromOutcome(policy.horizonOutcome),
-      `${action} bypasses the P3b1 HorizonOutcome seam`,
+      decisionVectorFromUtilityAssessment(policy.utilityAssessment),
+      `${action} bypasses the P3b2 T1b utility seam`,
     );
   }
 });
