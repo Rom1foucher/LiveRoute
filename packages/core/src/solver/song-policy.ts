@@ -65,6 +65,11 @@ import {
   type UtilityAssessment,
   type UtilityBreakpoint,
 } from "./utility-model.ts";
+import {
+  calibrationSensitive,
+  coRecommendationReason,
+  type CoRecommendationReason,
+} from "./robustness.ts";
 import { evaluateTransitionAwareSongPages } from "./song-transition.ts";
 import {
   alignHuntState,
@@ -207,10 +212,15 @@ export type SongPolicyDiagnostics = {
 
 export type SongPolicyResult = {
   recommended: SongPolicyEvaluation | null;
+  /** Alternatives whose order is unresolved for a named robustness cause. */
+  coRecommended: SongPolicyEvaluation[];
   safeAlternative: SongPolicyEvaluation | null;
   utilityRobustness: {
     comparedTo: string | null;
     breakpoints: readonly UtilityBreakpoint[];
+    coRecommendationReason: CoRecommendationReason | null;
+    /** P4 never fabricates paired MC uncertainty from marginal sampling runs. */
+    pairedComparison: null;
   };
   policies: SongPolicyEvaluation[];
   tokenPressure: TokenPressure[];
@@ -2304,7 +2314,35 @@ export const analyzeSongSelection = (
     .forEach((policy) => {
       policy.score = -1000;
     });
-  const recommended = ranked[0] ?? null;
+  const nominalRecommended = ranked[0] ?? null;
+  const nominalRunnerUp =
+    ranked.find((policy) => policy.id !== nominalRecommended?.id) ?? null;
+  const nominalBreakpoints =
+    nominalRecommended && nominalRunnerUp
+      ? utilityBreakpointsBetween(
+          nominalRecommended.utilityAssessment,
+          nominalRunnerUp.utilityAssessment,
+        )
+      : [];
+  const robustnessReason = coRecommendationReason({
+    monteCarloNotSeparated: false,
+    calibrationSensitive: calibrationSensitive(nominalBreakpoints),
+  });
+  // Calibration sensitivity is systematic, not sampling noise: under the
+  // fixed nominal policy its primary is already deterministic. Only a true
+  // MC not-separation needs an explicit stable tie-break independent of a
+  // noisy sample mean.
+  const recommended = nominalRecommended;
+  const coRecommended =
+    robustnessReason && nominalRunnerUp ? [nominalRunnerUp] : [];
+  const robustnessPeer = nominalRunnerUp;
+  const robustnessBreakpoints =
+    recommended && robustnessPeer
+      ? utilityBreakpointsBetween(
+          recommended.utilityAssessment,
+          robustnessPeer.utilityAssessment,
+        )
+      : [];
   const safeAlternative =
     ranked.find(
       (policy) =>
@@ -2314,19 +2352,15 @@ export const analyzeSongSelection = (
           (recommended?.decisionVector.riskAdmissible ?? 0),
     ) ?? null;
 
-  const runnerUp = ranked.find((policy) => policy.id !== recommended?.id) ?? null;
   const result: SongPolicyResult = {
     recommended,
+    coRecommended,
     safeAlternative,
     utilityRobustness: {
-      comparedTo: runnerUp?.id ?? null,
-      breakpoints:
-        recommended && runnerUp
-          ? utilityBreakpointsBetween(
-              recommended.utilityAssessment,
-              runnerUp.utilityAssessment,
-            )
-          : [],
+      comparedTo: robustnessPeer?.id ?? null,
+      breakpoints: robustnessBreakpoints,
+      coRecommendationReason: robustnessReason,
+      pairedComparison: null,
     },
     policies,
     tokenPressure,

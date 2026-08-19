@@ -57,14 +57,19 @@ test("P5 terminal page action switch is exhaustive and includes BUY_CONTINUE", (
   assert.match(source, /return assertNever\(action\)/);
 });
 
-test("P5 keeps paired Monte-Carlo separation until P4", () => {
-  const source = readFileSync(
+test("P4 generalizes the retained P5 paired comparison through one robustness seam", () => {
+  const terminalSource = readFileSync(
     new URL("../src/solver/terminal-technique.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /createPairedDifferenceStats/);
-  assert.match(source, /pairedMeanInterval/);
-  assert.match(source, /pairedDifferenceSeparated/);
+  const robustnessSource = readFileSync(
+    new URL("../src/solver/robustness.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(terminalSource, /createPairedDifferenceStats/);
+  assert.match(terminalSource, /pairedUtilityRobustness/);
+  assert.match(robustnessSource, /pairedMeanInterval/);
+  assert.match(robustnessSource, /pairedDifferenceSeparated/);
 });
 
 test("P5 BUY_CONTINUE contributes the second manual song instead of falling through", () => {

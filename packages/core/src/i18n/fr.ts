@@ -273,6 +273,10 @@ export const renderFr = (message: Message): string => {
       return `EXPOSE_AND_CARRY justifié : ${renderFr(message.gain)}`;
     case "terminal.stopNowPageNotReached":
       return "STOP_NOW : la page portée n’est pas atteinte assez sûrement";
+    case "terminal.stopNowNotSeparated":
+      return message.coRecommendationReason === "both"
+        ? "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions et la calibration peut aussi inverser l’ordre"
+        : "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions";
     case "terminal.stopNow":
       return `STOP_NOW : ${renderFr(message.gain)}`;
     case "terminal.exposeAndCarryValue":

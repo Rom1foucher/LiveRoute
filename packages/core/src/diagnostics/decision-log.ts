@@ -47,7 +47,7 @@ let session: DecisionSession = volatileDecisionSession();
 let writeQueue: Promise<DecisionSinkStatus | null> = Promise.resolve(null);
 
 /** Policy identity is deliberately separate from the mechanical rule-set id. */
-export const GRAND_LIVE_POLICY_VERSION = "grand-live-v7";
+export const GRAND_LIVE_POLICY_VERSION = "grand-live-v8";
 
 export const configureDecisionLog = (config: DecisionLogConfig): void => {
   appVersion = config.appVersion;

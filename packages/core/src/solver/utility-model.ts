@@ -302,28 +302,43 @@ export type UtilityBreakpoint = {
   aboveDelta: number;
 };
 
-export const utilityBreakpointBetween = (
-  left: UtilityAssessment,
-  right: UtilityAssessment,
-  parameter: UtilityParameterId,
-  calibration: UtilityCalibration = DEFAULT_UTILITY_CALIBRATION,
-): UtilityBreakpoint | null => {
-  if (
-    left.hardState !== right.hardState ||
-    left.riskAdmissibleState !== right.riskAdmissibleState
-  ) return null;
-  const deltaCoefficient =
-    left.linearTerms.coefficients[parameter] - right.linearTerms.coefficients[parameter];
+export const utilityBreakpointFromLinearTerms = ({
+  leftId,
+  rightId,
+  left,
+  right,
+  parameter,
+  calibration = DEFAULT_UTILITY_CALIBRATION,
+}: {
+  leftId: string;
+  rightId: string;
+  left: UtilityLinearTerms;
+  right: UtilityLinearTerms;
+  parameter: UtilityParameterId;
+  calibration?: UtilityCalibration;
+}): UtilityBreakpoint | null => {
+  const deltaCoefficient = left.coefficients[parameter] - right.coefficients[parameter];
   if (Math.abs(deltaCoefficient) <= 1e-12) return null;
+
+  const utilityFromTerms = (
+    terms: UtilityLinearTerms,
+    override: Partial<Record<UtilityParameterId, number>>,
+  ): number => {
+    let total = terms.fixedStatPoints;
+    for (const id of Object.keys(terms.coefficients) as UtilityParameterId[]) {
+      total += terms.coefficients[id] * (override[id] ?? calibration[id].value);
+    }
+    return total;
+  };
+
   const deltaOther =
-    utilityAtCalibration(left, calibration, { [parameter]: 0 }) -
-    utilityAtCalibration(right, calibration, { [parameter]: 0 });
+    utilityFromTerms(left, { [parameter]: 0 }) -
+    utilityFromTerms(right, { [parameter]: 0 });
   const value = -deltaOther / deltaCoefficient;
   if (!Number.isFinite(value)) return null;
   const definition = calibration[parameter];
   const withinCalibrationInterval = definition.calibrationInterval
-    ? value >= definition.calibrationInterval[0] &&
-      value <= definition.calibrationInterval[1]
+    ? value >= definition.calibrationInterval[0] && value <= definition.calibrationInterval[1]
     : null;
   const withinAdmissibleDomain = value >= definition.minimum;
   const epsilon = Math.max(1e-6, Math.abs(value) * 1e-4);
@@ -334,28 +349,83 @@ export const utilityBreakpointBetween = (
     value,
     scope: "fixed-projection-policy",
     projectionPolicy: PROJECTION_POLICY,
-    leftId: left.tieId,
-    rightId: right.tieId,
+    leftId,
+    rightId,
     withinCalibrationInterval,
     withinAdmissibleDomain,
     epsilon,
     belowDelta:
-      utilityAtCalibration(left, calibration, { [parameter]: below }) -
-      utilityAtCalibration(right, calibration, { [parameter]: below }),
+      utilityFromTerms(left, { [parameter]: below }) -
+      utilityFromTerms(right, { [parameter]: below }),
     aboveDelta:
-      utilityAtCalibration(left, calibration, { [parameter]: above }) -
-      utilityAtCalibration(right, calibration, { [parameter]: above }),
+      utilityFromTerms(left, { [parameter]: above }) -
+      utilityFromTerms(right, { [parameter]: above }),
   };
+};
+
+export const utilityBreakpointsFromLinearTerms = ({
+  leftId,
+  rightId,
+  left,
+  right,
+  calibration = DEFAULT_UTILITY_CALIBRATION,
+}: {
+  leftId: string;
+  rightId: string;
+  left: UtilityLinearTerms;
+  right: UtilityLinearTerms;
+  calibration?: UtilityCalibration;
+}): UtilityBreakpoint[] =>
+  (Object.keys(calibration) as UtilityParameterId[])
+    .map((parameter) =>
+      utilityBreakpointFromLinearTerms({
+        leftId,
+        rightId,
+        left,
+        right,
+        parameter,
+        calibration,
+      }),
+    )
+    .filter((value): value is UtilityBreakpoint =>
+      Boolean(value && value.withinAdmissibleDomain && value.withinCalibrationInterval !== false),
+    )
+    .sort((a, b) => a.parameter.localeCompare(b.parameter));
+
+export const utilityBreakpointBetween = (
+  left: UtilityAssessment,
+  right: UtilityAssessment,
+  parameter: UtilityParameterId,
+  calibration: UtilityCalibration = DEFAULT_UTILITY_CALIBRATION,
+): UtilityBreakpoint | null => {
+  if (
+    left.hardState !== right.hardState ||
+    left.riskAdmissibleState !== right.riskAdmissibleState
+  ) return null;
+  return utilityBreakpointFromLinearTerms({
+    leftId: left.tieId,
+    rightId: right.tieId,
+    left: left.linearTerms,
+    right: right.linearTerms,
+    parameter,
+    calibration,
+  });
 };
 
 export const utilityBreakpointsBetween = (
   left: UtilityAssessment,
   right: UtilityAssessment,
   calibration: UtilityCalibration = DEFAULT_UTILITY_CALIBRATION,
-): UtilityBreakpoint[] =>
-  (Object.keys(calibration) as UtilityParameterId[])
-    .map((parameter) => utilityBreakpointBetween(left, right, parameter, calibration))
-    .filter((value): value is UtilityBreakpoint =>
-      Boolean(value && value.withinAdmissibleDomain && value.withinCalibrationInterval !== false),
-    )
-    .sort((a, b) => a.parameter.localeCompare(b.parameter));
+): UtilityBreakpoint[] => {
+  if (
+    left.hardState !== right.hardState ||
+    left.riskAdmissibleState !== right.riskAdmissibleState
+  ) return [];
+  return utilityBreakpointsFromLinearTerms({
+    leftId: left.tieId,
+    rightId: right.tieId,
+    left: left.linearTerms,
+    right: right.linearTerms,
+    calibration,
+  });
+};

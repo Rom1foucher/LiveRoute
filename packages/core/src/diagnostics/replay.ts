@@ -116,7 +116,15 @@ type AnalysisDecisionSnapshot = {
 
 type SongPolicyDecisionSnapshot = {
   recommended: SongPolicyReference | null;
+  coRecommended: SongPolicyReference[];
   safeAlternative: SongPolicyReference | null;
+  utilityRobustness: {
+    comparedTo: string | null;
+    coRecommendationReason:
+      SongPolicyResult["utilityRobustness"]["coRecommendationReason"];
+    breakpoints: SongPolicyResult["utilityRobustness"]["breakpoints"];
+    pairedComparison: null;
+  };
   planId: string;
   policies: SongPolicyEvaluationSnapshot[];
 };
@@ -209,6 +217,11 @@ type TerminalDecisionSnapshot = {
   maxTrials: number;
   converged: boolean;
   uncertainAtBudgetLimit: boolean;
+  coRecommended: readonly ("stop-now" | "expose-and-carry")[];
+  coRecommendationReason:
+    TerminalTechniqueDecisionSummary["coRecommendationReason"];
+  calibrationSensitiveParameters: readonly string[];
+  pairedUtility: TerminalTechniqueDecisionSummary["pairedUtility"];
   timeBudgetExceeded: boolean;
   reachProbability: number;
   expectedCommittedCost: number;
@@ -382,6 +395,13 @@ const terminalSnapshot = (
   maxTrials: result.maxTrials,
   converged: result.converged,
   uncertainAtBudgetLimit: result.uncertainAtBudgetLimit,
+  coRecommended: [...result.coRecommended],
+  coRecommendationReason: result.coRecommendationReason,
+  calibrationSensitiveParameters: [...result.calibrationSensitiveParameters],
+  pairedUtility: {
+    ...result.pairedUtility,
+    interval: [...result.pairedUtility.interval] as readonly [number, number],
+  },
   timeBudgetExceeded: result.timeBudgetExceeded ?? false,
   reachProbability: result.reachProbability,
   expectedCommittedCost: result.expectedCommittedCost,
@@ -508,7 +528,17 @@ export const replayDecisionSnapshot = (
         kind: replay.kind,
         result: {
           recommended: policyReference(replay.result.recommended),
+          coRecommended: replay.result.coRecommended
+            .map(policyReference)
+            .filter((value): value is SongPolicyReference => value !== null),
           safeAlternative: policyReference(replay.result.safeAlternative),
+          utilityRobustness: {
+            comparedTo: replay.result.utilityRobustness.comparedTo,
+            coRecommendationReason:
+              replay.result.utilityRobustness.coRecommendationReason,
+            breakpoints: replay.result.utilityRobustness.breakpoints,
+            pairedComparison: null,
+          },
           planId: replay.result.plan.id,
           policies: [...replay.result.policies]
             .sort((left, right) => left.id.localeCompare(right.id))

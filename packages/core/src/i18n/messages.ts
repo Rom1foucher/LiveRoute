@@ -155,6 +155,13 @@ export type Message =
   | { code: "terminal.gainNone" }
   | { code: "terminal.exposeAndCarry"; gain: Message }
   | { code: "terminal.stopNowPageNotReached" }
+  | {
+      code: "terminal.stopNowNotSeparated";
+      coRecommendationReason:
+        | "monte-carlo-not-separated"
+        | "calibration-sensitive"
+        | "both";
+    }
   | { code: "terminal.stopNow"; gain: Message }
   | {
       code: "terminal.exposeAndCarryValue";

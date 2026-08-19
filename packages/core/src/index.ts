@@ -27,6 +27,7 @@ export * from "./solver/hunt-state.ts";
 export * from "./solver/horizon-outcome.ts";
 export * from "./solver/page-actions.ts";
 export * from "./solver/resource-economy.ts";
+export * from "./solver/robustness.ts";
 export * from "./solver/song-dp.ts";
 export * from "./solver/song-policy.ts";
 export * from "./solver/song-transition.ts";

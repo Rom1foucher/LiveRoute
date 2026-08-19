@@ -240,6 +240,13 @@ test("HUNT_SP3 préfère SP +3 à une ancienne Friendship +5 puis s'arrête", ()
   assert.equal(result.recommended?.postPurchasePlanId, "hold");
   assert.equal(result.recommended?.postPurchaseObjective, "carryover");
   assert.equal(result.recommended?.continuationRecommendation, "stop");
+  assert.equal(
+    result.utilityRobustness.coRecommendationReason,
+    "calibration-sensitive",
+  );
+  assert.ok(result.coRecommended.length >= 1);
+  assert.ok(result.utilityRobustness.breakpoints.length >= 1);
+  assert.equal(result.utilityRobustness.pairedComparison, null);
 });
 
 test("C4 ouverte achète une Friendship +10 déjà exposée", () => {

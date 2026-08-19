@@ -202,6 +202,10 @@ const SAMPLES: Record<MessageCode, Message> = {
     gain: { code: "terminal.gainNextTarget" },
   },
   "terminal.stopNowPageNotReached": { code: "terminal.stopNowPageNotReached" },
+  "terminal.stopNowNotSeparated": {
+    code: "terminal.stopNowNotSeparated",
+    coRecommendationReason: "monte-carlo-not-separated",
+  },
   "terminal.stopNow": {
     code: "terminal.stopNow",
     gain: { code: "terminal.gainNone" },

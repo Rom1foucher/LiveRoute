@@ -43,13 +43,15 @@ export const probabilityEstimateStable = ({
   samples,
   thresholds = [],
   maxWidth,
+  z = 1.959963984540054,
 }: {
   successes: number;
   samples: number;
   thresholds?: readonly number[];
   maxWidth?: number;
+  z?: number;
 }): boolean => {
-  const interval = wilsonInterval(successes, samples);
+  const interval = wilsonInterval(successes, samples, z);
   if (intervalCrosses(interval, thresholds)) return false;
   return maxWidth === undefined || interval[1] - interval[0] <= maxWidth;
 };
@@ -92,8 +94,9 @@ export const pairedMeanInterval = (
 export const pairedDifferenceSeparated = (
   stats: PairedDifferenceStats,
   threshold = 0,
+  z = 1.959963984540054,
 ): "above" | "below" | "uncertain" => {
-  const interval = pairedMeanInterval(stats);
+  const interval = pairedMeanInterval(stats, z);
   if (interval[0] > threshold) return "above";
   if (interval[1] <= threshold) return "below";
   return "uncertain";

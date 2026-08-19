@@ -264,6 +264,10 @@ export const renderEn = (message: Message): string => {
       return `EXPOSE_AND_CARRY justified: ${renderEn(message.gain)}`;
     case "terminal.stopNowPageNotReached":
       return "STOP_NOW: the carried Shop is not reached reliably enough";
+    case "terminal.stopNowNotSeparated":
+      return message.coRecommendationReason === "both"
+        ? "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo is not separated and calibration can also reverse the order"
+        : "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo has not separated the actions";
     case "terminal.stopNow":
       return `STOP_NOW: ${renderEn(message.gain)}`;
     case "terminal.exposeAndCarryValue":

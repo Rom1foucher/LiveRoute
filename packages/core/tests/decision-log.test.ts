@@ -146,7 +146,7 @@ test("le journal navigateur écrit un événement v5 lié, versionné et hashé"
   ) as Array<Record<string, unknown>>;
   assert.equal(stored.length, 1);
   assert.equal(stored[0].schemaVersion, 5);
-  assert.equal(stored[0].policyVersion, "grand-live-v7");
+  assert.equal(stored[0].policyVersion, "grand-live-v8");
   assert.equal(stored[0].previousDecisionId, "decision-1");
   assert.match(String(stored[0].stateHash), /^C3-[0-9A-F]{8}$/);
   assert.equal(stored[0].stateAfterHash, decisionStateHash(stateAfter));
@@ -225,6 +225,20 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       maxTrials: 80,
       converged: false,
       uncertainAtBudgetLimit: true,
+      coRecommended: ["expose-and-carry"] as const,
+      coRecommendationReason: "monte-carlo-not-separated" as const,
+      calibrationSensitiveParameters: [],
+      pairedUtility: {
+        policy: "grand-live-robustness-v1" as const,
+        mean: 0,
+        interval: [-1, 1] as const,
+        confidenceLevel: 0.95 as const,
+        samples: 80,
+        maxSamples: 80,
+        separation: "not-separated" as const,
+        convergenceReason: "max-samples" as const,
+        couplingKey: "terminal:fixture:future",
+      },
       seedKey: "terminal:fixture",
       canonicalActionKey: "tech:fixture",
       reachProbability: 0.75,

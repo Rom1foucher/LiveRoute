@@ -5,9 +5,9 @@ P3b2 completes the semantic migration started by P3a/P3b1 for the song solver.
 uses a separate **T1b utility assessment** with an explicit stat-point numeraire.
 The temporary P3b1 metric-to-vector bridge is deleted.
 
-P3b2 originally left terminal C4 and the full paired Monte-Carlo
-co-recommendation policy outside this seam. P5 has since migrated terminal C4;
-full paired uncertainty/co-recommendation remains P4.
+P3b2 originally left terminal C4 and paired Monte-Carlo robustness outside
+this seam. P5 migrated terminal C4, and P4 now adds the robustness stage. The
+full durable diagnostic schema remains P6.
 
 ## Pipeline after P3b2
 
@@ -26,13 +26,18 @@ utilityAssessmentFromOutcome() (T1b)
 stat-point numeraire + named calibration parameters
     |
     v
-hard/admissibility gates -> nominal utility -> deterministic tie id
+P4 robustness
+paired MC interval + calibration breakpoints + named co-recommendation cause
+    |
+    v
+hard/admissibility gates -> robust decision + deterministic primary
 ```
 
 A compatibility `DecisionVector` is still emitted for diagnostics and consumers
 that have not yet migrated, but when it contains `utilityStatPoints` its legacy
-lanes are not decision inputs. The terminal-technique path remains on the legacy
-vector until P5.
+lanes are not decision inputs. P5 moved terminal-technique decisions onto the
+same T1a/T1b utility seam; P4 layers robustness on top without changing that
+mechanical or utility contract.
 
 ## T1a mechanical contract
 
@@ -163,15 +168,22 @@ Only decision-relevant values are retained:
 - free parameters must cross inside their non-negative policy domain;
 - calibration never claims to overturn a different hard/admissibility state.
 
-## Monte-Carlo coupling boundary
+## P4 robustness boundary
 
-T1a keeps Monte-Carlo `couplingKey` metadata on related projections. P3b2 does
-not yet generalize confidence intervals, adaptive resampling, or
-co-recommendation. That remains P4.
+T1a keeps Monte-Carlo `couplingKey` metadata on related projections. P4 now
+generalizes the terminal path's existing common-random-number comparison into
+a named paired robustness report. A Monte-Carlo cause is emitted only where
+per-trial differences are actually retained; a shared seed label alone is not
+treated as proof of pairing.
 
-This separation is deliberate: a **calibration-sensitive** order and a
-**Monte-Carlo-not-separated** order require different remedies and must not be
-collapsed into one notion of uncertainty.
+Song policy currently exposes `pairedComparison = null` because its sampling
+results are marginal rather than a retained paired utility-difference stream.
+It can still expose calibration sensitivity. This is deliberate: a
+**calibration-sensitive** order and a **monte-carlo-not-separated** order have
+opposite remedies and are never collapsed into one generic uncertainty flag.
+
+See `docs/ROBUSTNESS_P4.md` for the frozen confidence policy, convergence
+reasons and co-recommendation contract.
 
 ## Compatibility boundary after P5
 

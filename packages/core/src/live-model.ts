@@ -283,6 +283,34 @@ export type TerminalTechniqueDecisionSummary = {
   converged: boolean;
   /** Sample or wall-clock budget ended while a material boundary stayed unresolved. */
   uncertainAtBudgetLimit: boolean;
+  /** Canonical secondary action(s) when the primary is deliberately not claimed superior. */
+  coRecommended: readonly ("stop-now" | "expose-and-carry")[];
+  /** Statistical and calibration causes remain distinct because their remedies are opposite. */
+  coRecommendationReason:
+    | "monte-carlo-not-separated"
+    | "calibration-sensitive"
+    | "both"
+    | null;
+  /** Free/bounded utility rates whose admissible breakpoint can reverse this comparison. */
+  calibrationSensitiveParameters: readonly string[];
+  /** P4 paired uncertainty for U(PUSH) - U(STOP) under common random numbers. */
+  pairedUtility: {
+    policy: "grand-live-robustness-v1";
+    mean: number;
+    interval: readonly [number, number];
+    confidenceLevel: 0.95;
+    samples: number;
+    maxSamples: number;
+    separation: "above" | "below" | "not-separated";
+    convergenceReason:
+      | "minimum-samples"
+      | "risk-and-paired-separated"
+      | "paired-separated"
+      | "max-samples"
+      | "time-budget"
+      | "sampling";
+    couplingKey: string;
+  };
   /** True when a caller-provided wall-clock guard stopped terminal MC early. */
   timeBudgetExceeded?: boolean;
   /** Shared common-random-number family used for sibling candidates. */

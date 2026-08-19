@@ -79,7 +79,7 @@ export const compareDecisionVectors = (
     ? compareNumber(left.utilityStatPoints, right.utilityStatPoints) ||
       (left.tieId === right.tieId ? 0 : left.tieId < right.tieId ? 1 : -1)
     :
-  // Legacy path retained only for terminal-technique consumers until P5.
+  // Legacy path retained only for compatibility consumers that do not yet emit T1b utility.
   compareNumber(left.structural, right.structural) ||
   compareVector(left.certain ?? [], right.certain ?? []) ||
   compareProspectiveVector(left.prospective ?? [], right.prospective ?? []) ||

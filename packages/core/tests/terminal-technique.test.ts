@@ -515,3 +515,105 @@ test("hotfix v6 : le budget temporel terminal rend la main avec un diagnostic d'
   );
   assert.ok(assessments.every((assessment) => assessment.trials < 7200));
 });
+
+test("P4 boundary: paired MC uncertainty co-recommends instead of forcing a noisy winner", () => {
+  const currentSongs = [
+    "daisuki",
+    "fanfare",
+    "bluebird",
+    "a-no-ne",
+    "pyoitto",
+  ].map(songTarget);
+  const plan = deriveStrategicPlan({
+    concertIndex: 2,
+    timingMode: "deadline-now",
+    remainingSongs: currentSongs,
+    songsThisSection: 0,
+  });
+  assert.equal(plan.mode, "close");
+
+  const assessment = evaluateTerminalTechniqueOptions({
+    concertIndex: 2,
+    period: "senior",
+    tokens: balance({
+      dance: 40,
+      passion: 40,
+      vocal: 40,
+      visual: 40,
+      mental: 40,
+    }),
+    candidates: [{ id: "dance-10", cost: balance({ dance: 10 }) }],
+    techniquesRemaining: 2,
+    currentSongs,
+    totalSongs: 13,
+    songsThisSection: 0,
+    plan,
+    trials: 80,
+    minimumSamples: 80,
+    seedKey: "search:2:40:6",
+  })?.[0];
+
+  assert.ok(assessment);
+  assert.equal(assessment.action, "stop-now");
+  assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
+  assert.equal(
+    assessment.coRecommendationReason,
+    "monte-carlo-not-separated",
+  );
+  assert.deepEqual(assessment.calibrationSensitiveParameters, []);
+  assert.equal(assessment.pairedUtility.confidenceLevel, 0.95);
+  assert.equal(assessment.pairedUtility.samples, 80);
+  assert.equal(assessment.pairedUtility.maxSamples, 80);
+  assert.equal(assessment.pairedUtility.separation, "not-separated");
+  assert.equal(assessment.pairedUtility.convergenceReason, "max-samples");
+  assert.ok(assessment.pairedUtility.interval[0] < 0);
+  assert.ok(assessment.pairedUtility.interval[1] > 0);
+});
+
+test("P4 boundary: Monte-Carlo and calibration uncertainty are reported as both", () => {
+  const currentSongs = [
+    "daisuki",
+    "fanfare",
+    "bluebird",
+    "a-no-ne",
+    "pyoitto",
+  ].map(songTarget);
+  const plan = deriveStrategicPlan({
+    concertIndex: 2,
+    timingMode: "deadline-now",
+    remainingSongs: currentSongs,
+    songsThisSection: 0,
+  });
+
+  const assessment = evaluateTerminalTechniqueOptions({
+    concertIndex: 2,
+    period: "senior",
+    tokens: balance({
+      dance: 60,
+      passion: 60,
+      vocal: 60,
+      visual: 60,
+      mental: 60,
+    }),
+    candidates: [{ id: "dance-10", cost: balance({ dance: 10 }) }],
+    techniquesRemaining: 2,
+    currentSongs,
+    totalSongs: 13,
+    songsThisSection: 0,
+    plan,
+    trials: 80,
+    minimumSamples: 80,
+    seedKey: "search:2:60:6",
+  })?.[0];
+
+  assert.ok(assessment);
+  assert.equal(assessment.action, "stop-now");
+  assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
+  assert.equal(assessment.coRecommendationReason, "both");
+  assert.ok(
+    assessment.calibrationSensitiveParameters.includes("SKILL_POINT_UTILITY"),
+  );
+  assert.equal(assessment.pairedUtility.separation, "not-separated");
+  assert.ok(assessment.pairedUtility.interval[0] < 0);
+  assert.ok(assessment.pairedUtility.interval[1] > 0);
+});

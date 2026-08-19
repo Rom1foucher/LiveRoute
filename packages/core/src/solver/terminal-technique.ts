@@ -43,16 +43,27 @@ import {
   addPairedDifference,
   canonicalNumberKey,
   createPairedDifferenceStats,
-  pairedDifferenceSeparated,
-  pairedMeanInterval,
   probabilityEstimateStable,
   wilsonInterval,
   type PairedDifferenceStats,
 } from "../monte-carlo.ts";
 import {
   compareUtilityAssessments,
+  utilityBreakpointsFromLinearTerms,
   type UtilityAssessment,
+  type UtilityLinearTerms,
+  type UtilityParameterId,
 } from "./utility-model.ts";
+import {
+  calibrationSensitive,
+  coRecommendationReason,
+  pairedUtilityRobustness,
+  stableCoRecommendationPrimary,
+  ROBUSTNESS_BATCH_SIZE,
+  ROBUSTNESS_DEFAULT_MAX_SAMPLES,
+  ROBUSTNESS_DEFAULT_MIN_SAMPLES,
+  ROBUSTNESS_NORMAL_Z,
+} from "./robustness.ts";
 import { terminalUtilityFromTrial } from "./terminal-outcome.ts";
 
 export type TerminalTechniqueCandidate = {
@@ -116,6 +127,53 @@ type Aggregate = {
   committedCost: number;
   weightedCommittedCost: number;
 };
+
+const UTILITY_PARAMETER_IDS: readonly UtilityParameterId[] = [
+  "SKILL_POINT_UTILITY",
+  "FRIENDSHIP_EXPOSURE_STAT_RATE",
+  "SCENARIO_SKILL_UTILITY",
+  "SCENARIO_EVENT_UTILITY",
+];
+
+type UtilityLinearAggregate = {
+  fixedStatPoints: number;
+  coefficients: Record<UtilityParameterId, number>;
+};
+
+const emptyUtilityLinearAggregate = (): UtilityLinearAggregate => ({
+  fixedStatPoints: 0,
+  coefficients: {
+    SKILL_POINT_UTILITY: 0,
+    FRIENDSHIP_EXPOSURE_STAT_RATE: 0,
+    SCENARIO_SKILL_UTILITY: 0,
+    SCENARIO_EVENT_UTILITY: 0,
+  },
+});
+
+const addUtilityLinearTerms = (
+  aggregate: UtilityLinearAggregate,
+  assessment: UtilityAssessment | null,
+): void => {
+  if (!assessment) return;
+  aggregate.fixedStatPoints += assessment.linearTerms.fixedStatPoints;
+  for (const parameter of UTILITY_PARAMETER_IDS) {
+    aggregate.coefficients[parameter] +=
+      assessment.linearTerms.coefficients[parameter];
+  }
+};
+
+const normalizedUtilityLinearTerms = (
+  aggregate: UtilityLinearAggregate,
+  samples: number,
+): UtilityLinearTerms => ({
+  fixedStatPoints: aggregate.fixedStatPoints / Math.max(1, samples),
+  coefficients: Object.fromEntries(
+    UTILITY_PARAMETER_IDS.map((parameter) => [
+      parameter,
+      aggregate.coefficients[parameter] / Math.max(1, samples),
+    ]),
+  ) as Record<UtilityParameterId, number>,
+});
 
 const emptyAggregate = (): Aggregate => ({
   completions: 0,
@@ -460,15 +518,21 @@ export const evaluateTerminalTechniqueOptions = (
     return null;
   }
 
-  const maxTrials = Math.max(80, Math.trunc(input.trials ?? 2400));
+  const maxTrials = Math.max(
+    80,
+    Math.trunc(input.trials ?? ROBUSTNESS_DEFAULT_MAX_SAMPLES),
+  );
   const minimumSamples = Math.min(
     maxTrials,
     Math.max(
       1,
-      Math.trunc(input.minimumSamples ?? (maxTrials <= 128 ? maxTrials : 192)),
+      Math.trunc(
+        input.minimumSamples ??
+          (maxTrials <= 128 ? maxTrials : ROBUSTNESS_DEFAULT_MIN_SAMPLES),
+      ),
     ),
   );
-  const convergenceBatch = 64;
+  const convergenceBatch = ROBUSTNESS_BATCH_SIZE;
   const startedAt = wallClockNow();
   const maxDurationMs =
     input.maxDurationMs === undefined
@@ -489,6 +553,7 @@ export const evaluateTerminalTechniqueOptions = (
   const admissionThreshold = input.concertIndex === 3 ? catastropheFloor : threshold;
   const baseSeed = `${input.seedKey ?? "terminal-technique"}:crn`;
   const stopAggregate = emptyAggregate();
+  const stopUtilityLinear = emptyUtilityLinearAggregate();
   let stopUtilityTotal = 0;
 
   const candidateKeyById = new Map<string, string>();
@@ -503,6 +568,12 @@ export const evaluateTerminalTechniqueOptions = (
   );
   const pushUtilityTotals = new Map(
     [...uniqueCandidates.keys()].map((key) => [key, 0]),
+  );
+  const pushUtilityLinear = new Map(
+    [...uniqueCandidates.keys()].map((key) => [
+      key,
+      emptyUtilityLinearAggregate(),
+    ]),
   );
   const pairedUtilityStats = new Map<string, PairedDifferenceStats>(
     [...uniqueCandidates.keys()].map((key) => [
@@ -519,13 +590,15 @@ export const evaluateTerminalTechniqueOptions = (
       samples,
       thresholds: [admissionThreshold, 0.985],
       maxWidth: 0.05,
+      z: ROBUSTNESS_NORMAL_Z,
     });
-    const utilityStable =
-      pairedDifferenceSeparated(
-        pairedUtilityStats.get(key) ?? createPairedDifferenceStats(),
-        0,
-      ) !== "uncertain";
-    return reachStable && utilityStable;
+    const paired = pairedUtilityRobustness({
+      stats: pairedUtilityStats.get(key) ?? createPairedDifferenceStats(),
+      minimumSamples,
+      maxSamples: maxTrials,
+      couplingKey: `${baseSeed}:future`,
+    });
+    return reachStable && paired.separation !== "not-separated";
   };
 
   let actualTrials = 0;
@@ -547,7 +620,7 @@ export const evaluateTerminalTechniqueOptions = (
       trial,
     );
     const stopResult = stopActionTrial?.result ?? null;
-    const stopUtility = stopResult
+    const stopUtilityAssessment = stopResult
       ? terminalUtilityFromTrial({
           tieId: "stop-now",
           concertIndex: input.concertIndex,
@@ -555,9 +628,11 @@ export const evaluateTerminalTechniqueOptions = (
           currentSectionPurchases: 0,
           result: stopResult,
           couplingKey: `${baseSeed}:future`,
-        }).nominalStatPoints
-      : 0;
+        })
+      : null;
+    const stopUtility = stopUtilityAssessment?.nominalStatPoints ?? 0;
     stopUtilityTotal += stopUtility;
+    addUtilityLinearTerms(stopUtilityLinear, stopUtilityAssessment);
     if (stopResult) addTrial(stopAggregate, stopResult);
 
     for (const [actionKey, candidate] of uniqueCandidates) {
@@ -643,6 +718,10 @@ export const evaluateTerminalTechniqueOptions = (
         actionKey,
         (pushUtilityTotals.get(actionKey) ?? 0) + pushUtility,
       );
+      const linearAggregate = pushUtilityLinear.get(actionKey);
+      if (linearAggregate) {
+        addUtilityLinearTerms(linearAggregate, bestEvaluation?.utility ?? null);
+      }
       addPairedDifference(pairedUtility, pushUtility - stopUtility);
 
       aggregate.committedCost +=
@@ -680,25 +759,84 @@ export const evaluateTerminalTechniqueOptions = (
     const pushUtilityStatPoints = (pushUtilityTotals.get(actionKey) ?? 0) / trials;
     const paired =
       pairedUtilityStats.get(actionKey) ?? createPairedDifferenceStats();
-    const utilityDeltaInterval = pairedMeanInterval(paired);
-    const utilityDeltaStatPoints = paired.mean;
-    const reachLowerBound = wilsonInterval(aggregate.completions, trials)[0];
+    const reachInterval = wilsonInterval(
+      aggregate.completions,
+      trials,
+      ROBUSTNESS_NORMAL_Z,
+    );
+    const reachLowerBound = reachInterval[0];
     const safetyAdmissible = reachLowerBound >= admissionThreshold;
-    const shouldPush = safetyAdmissible && utilityDeltaStatPoints > 0;
+    const riskClearlyBelow = reachInterval[1] < admissionThreshold;
+    const riskNotSeparated = !safetyAdmissible && !riskClearlyBelow;
+    const pairedRobustness = pairedUtilityRobustness({
+      stats: paired,
+      minimumSamples,
+      maxSamples: maxTrials,
+      couplingKey: `${baseSeed}:future`,
+      timeBudgetExceeded,
+      riskSeparated: !riskNotSeparated,
+    });
+    const utilityDeltaInterval = pairedRobustness.interval;
+    const utilityDeltaStatPoints = pairedRobustness.mean;
+    const pushLinearTerms = normalizedUtilityLinearTerms(
+      pushUtilityLinear.get(actionKey) ?? emptyUtilityLinearAggregate(),
+      trials,
+    );
+    const stopLinearTerms = normalizedUtilityLinearTerms(
+      stopUtilityLinear,
+      trials,
+    );
+    const calibrationBreakpoints =
+      riskClearlyBelow
+        ? []
+        : utilityBreakpointsFromLinearTerms({
+            leftId: "expose-and-carry",
+            rightId: "stop-now",
+            left: pushLinearTerms,
+            right: stopLinearTerms,
+          });
+    const calibrationIsSensitive = calibrationSensitive(calibrationBreakpoints);
+    const monteCarloNotSeparated =
+      riskNotSeparated || pairedRobustness.separation === "not-separated";
+    const coReason = coRecommendationReason({
+      monteCarloNotSeparated,
+      calibrationSensitive: calibrationIsSensitive,
+    });
+    // Co-recommended actions are deliberately not called equivalent. A true
+    // Monte-Carlo not-separation uses the versioned STOP-first stable primary
+    // because another seed/sample can reverse the sample mean. Calibration
+    // sensitivity is systematic instead: under the nominal fixed policy the
+    // primary stays the nominal utility winner while the alternative remains
+    // explicitly co-recommended.
+    const nominalShouldPush = safetyAdmissible && utilityDeltaStatPoints > 0;
+    const robustPrimary = monteCarloNotSeparated
+      ? stableCoRecommendationPrimary(
+          ["stop-now", "expose-and-carry"] as const,
+          ["stop-now", "expose-and-carry"] as const,
+        )
+      : null;
+    const shouldPush = monteCarloNotSeparated
+      ? robustPrimary === "expose-and-carry"
+      : nominalShouldPush;
     const reason: Message =
-      input.concertIndex === 3 && reachLowerBound < catastropheFloor
+      monteCarloNotSeparated
         ? {
-            code: "terminal.stopNowCatastropheFloor",
-            grossValue: pushUtilityStatPoints,
-            opportunityCost: stopUtilityStatPoints,
-            riskPenalty: 0,
-            netValue: utilityDeltaStatPoints,
-            reachLowerBound,
-            catastropheFloor,
+            code: "terminal.stopNowNotSeparated",
+            coRecommendationReason: coReason ?? "monte-carlo-not-separated",
           }
-        : !safetyAdmissible
-          ? { code: "terminal.stopNowPageNotReached" }
-          : shouldPush
+        : input.concertIndex === 3 && reachLowerBound < catastropheFloor
+          ? {
+              code: "terminal.stopNowCatastropheFloor",
+              grossValue: pushUtilityStatPoints,
+              opportunityCost: stopUtilityStatPoints,
+              riskPenalty: 0,
+              netValue: utilityDeltaStatPoints,
+              reachLowerBound,
+              catastropheFloor,
+            }
+          : !safetyAdmissible
+            ? { code: "terminal.stopNowPageNotReached" }
+            : shouldPush
             ? {
                 code: "terminal.exposeAndCarryValue",
                 grossValue: pushUtilityStatPoints,
@@ -730,6 +868,14 @@ export const evaluateTerminalTechniqueOptions = (
       maxTrials,
       converged,
       uncertainAtBudgetLimit,
+      coRecommended: coReason
+        ? ([shouldPush ? "stop-now" : "expose-and-carry"] as const)
+        : ([] as const),
+      coRecommendationReason: coReason,
+      calibrationSensitiveParameters: calibrationBreakpoints.map(
+        (breakpoint) => breakpoint.parameter,
+      ),
+      pairedUtility: pairedRobustness,
       timeBudgetExceeded,
       seedKey: baseSeed,
       canonicalActionKey: actionKey,
