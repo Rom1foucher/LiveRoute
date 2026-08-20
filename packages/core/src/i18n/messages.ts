@@ -59,6 +59,22 @@ export type Message =
       netValue: number;
       pages: number;
     }
+  | {
+      code: "reason.huntAbandonUnreachable";
+      appearanceProbability: number;
+      pages: number;
+    }
+  | {
+      code: "reason.huntContinueReachability";
+      appearanceProbability: number;
+      findAndFundProbability: number;
+      zeroIncomeFundabilityProbability: number | null;
+      fundingAssessment:
+        | "zero-income-fundable"
+        | "future-income-required"
+        | "unreachable";
+      pages: number;
+    }
   | { code: "reason.securesGreatSuccess" }
   | {
       code: "reason.nextSectionCheckpoint";

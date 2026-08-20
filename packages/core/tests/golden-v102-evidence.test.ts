@@ -8,6 +8,9 @@ import {
   type GoldenManifest,
 } from "../src/diagnostics/golden-evidence.ts";
 
+const validateGoldenManifest: (value: unknown) => asserts value is GoldenManifest =
+  assertGoldenManifest;
+
 const loadManifest = async (): Promise<GoldenManifest> => {
   const raw = JSON.parse(
     await readFile(
@@ -15,7 +18,7 @@ const loadManifest = async (): Promise<GoldenManifest> => {
       "utf8",
     ),
   ) as unknown;
-  assertGoldenManifest(raw);
+  validateGoldenManifest(raw);
   return raw;
 };
 
@@ -23,7 +26,7 @@ test("v1.0.2 golden manifest is structurally valid and uses accepted explicit ch
   const manifest = await loadManifest();
   assert.equal(manifest.baseline.policyVersion, "grand-live-v6");
   assert.equal(manifest.baseline.releaseTag, "v1.0.2");
-  assert.ok(manifest.checkpoints.length >= 15);
+  assert.equal(manifest.checkpoints.length, 25);
   assert.ok(
     manifest.checkpoints.every((entry) => entry.reviewStatus === "accepted"),
   );
@@ -34,6 +37,11 @@ test("v1.0.2 golden manifest is structurally valid and uses accepted explicit ch
     manifest.checkpoints.some((entry) => entry.category === "hunt-target"),
   );
   assert.ok(manifest.checkpoints.some((entry) => entry.category === "c4-push"));
+  assert.equal(
+    manifest.checkpoints.filter((entry) => entry.category === "c4-terminal")
+      .length,
+    6,
+  );
   assert.ok(
     manifest.checkpoints.some((entry) => entry.category === "grand-live-conversion"),
   );
@@ -166,5 +174,78 @@ test("golden extractor rejects a historical action that no longer matches the cl
         ]),
       ),
     /expected choice id kiseki/,
+  );
+});
+
+test("golden extractor validates a terminal PUSH/STOP action inside a recommendation candidate", () => {
+  const manifest: GoldenManifest = {
+    manifestVersion: 1,
+    id: "terminal-test",
+    baseline: {
+      releaseTag: "v1.0.2",
+      commit: "69cb994",
+      policyVersion: "grand-live-v6",
+      ruleSetId: "rules",
+    },
+    sources: [{ id: "source", fileName: "decision.ndjson" }],
+    runs: [
+      {
+        id: "run",
+        sourceId: "source",
+        sessionId: "session",
+        reviewStatus: "accepted",
+      },
+    ],
+    checkpoints: [
+      {
+        id: "terminal-checkpoint",
+        runId: "run",
+        category: "c4-terminal",
+        reviewStatus: "accepted",
+        selector: {
+          event: "recommendation",
+          sequence: 154,
+          stateHash: "C4-AAAA",
+        },
+        expect: { terminalCandidateId: "2", terminalAction: "stop-now" },
+        reason: "test",
+      },
+    ],
+  };
+  const entries = parseNdjson(
+    `${JSON.stringify({
+      policyVersion: "grand-live-v6",
+      ruleSetId: "rules",
+      sessionId: "session",
+      sequence: 154,
+      stateHash: "C4-AAAA",
+      event: "recommendation",
+      recommendation: {
+        page: "techniques",
+        normal: "option-3:stop",
+        candidates: [
+          {
+            id: "option-3",
+            terminalDecision: { candidateId: "2", action: "stop-now" },
+          },
+        ],
+      },
+    })}\n`,
+    "decision.ndjson",
+  );
+  const snapshot = extractGoldenEvidence(
+    manifest,
+    new Map([["source", entries]]),
+  );
+  assert.equal(snapshot.checkpoints.length, 1);
+
+  const wrongAction = structuredClone(manifest);
+  wrongAction.checkpoints[0]!.expect = {
+    terminalCandidateId: "2",
+    terminalAction: "expose-and-carry",
+  };
+  assert.throws(
+    () => extractGoldenEvidence(wrongAction, new Map([["source", entries]])),
+    /expected terminal action expose-and-carry, got stop-now/,
   );
 });

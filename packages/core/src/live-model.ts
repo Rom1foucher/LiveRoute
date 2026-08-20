@@ -72,6 +72,71 @@ export type TrainingStat = TrainingFacility;
 export type RemainingTrainingsByFacility = Record<TrainingFacility, number>;
 
 /**
+ * Exhaustive semantic forms used by the Grand Live catalogue. Permanent
+ * training effects are behavioural projections; flat bonuses are immediate
+ * deterministic rewards and must never be collapsed into the same metric.
+ */
+export type SongPracticeEffect =
+  | { kind: "training-stat"; stat: TrainingStat; amount: number }
+  | { kind: "training-skill-point"; amount: number }
+  | { kind: "immediate-stat"; stat: TrainingStat; amount: number }
+  | { kind: "immediate-skill-point"; amount: number };
+
+export const parseSongPracticeEffect = (
+  practiceBonus: string,
+): SongPracticeEffect | null => {
+  const normalized = practiceBonus.trim();
+  let match = normalized.match(
+    /^(speed|stamina|power|guts|wisdom) training \+(\d+)$/i,
+  );
+  if (match) {
+    return {
+      kind: "training-stat",
+      stat: match[1].toLowerCase() as TrainingStat,
+      amount: Math.max(0, Number.parseInt(match[2] ?? "0", 10)),
+    };
+  }
+  match = normalized.match(/^skill pts? training \+(\d+)$/i);
+  if (match) {
+    return {
+      kind: "training-skill-point",
+      amount: Math.max(0, Number.parseInt(match[1] ?? "0", 10)),
+    };
+  }
+  match = normalized.match(/^(speed|stamina|power|guts|wisdom) \+(\d+)$/i);
+  if (match) {
+    return {
+      kind: "immediate-stat",
+      stat: match[1].toLowerCase() as TrainingStat,
+      amount: Math.max(0, Number.parseInt(match[2] ?? "0", 10)),
+    };
+  }
+  match = normalized.match(/^skill pts? \+(\d+)$/i);
+  if (match) {
+    return {
+      kind: "immediate-skill-point",
+      amount: Math.max(0, Number.parseInt(match[1] ?? "0", 10)),
+    };
+  }
+  return null;
+};
+
+export const immediatePracticeRewards = (
+  practiceBonus: string | undefined,
+): { statPoints: number; skillPoints: number } => {
+  if (!practiceBonus) return { statPoints: 0, skillPoints: 0 };
+  const effect = parseSongPracticeEffect(practiceBonus);
+  if (!effect) return { statPoints: 0, skillPoints: 0 };
+  if (effect.kind === "immediate-stat") {
+    return { statPoints: effect.amount, skillPoints: 0 };
+  }
+  if (effect.kind === "immediate-skill-point") {
+    return { statPoints: 0, skillPoints: effect.amount };
+  }
+  return { statPoints: 0, skillPoints: 0 };
+};
+
+/**
  * Timing of a song effect relative to the Promotional Live that closes the
  * current solver section. `concertIndex` follows the solver section index:
  * 0..3 are the four Promotional Live sections and 4 is the Grand Live.
@@ -273,8 +338,8 @@ export type SongOutcome = {
 
 export type TerminalUtilityBreakpoint = {
   parameter:
-    | "SKILL_POINT_UTILITY"
     | "FRIENDSHIP_EXPOSURE_STAT_RATE"
+    | "SKILL_POINT_UTILITY"
     | "SCENARIO_SKILL_UTILITY"
     | "SCENARIO_EVENT_UTILITY";
   value: number;
@@ -777,11 +842,6 @@ export const activationMoment = ({
   };
 };
 
-const parseTrainingMagnitude = (practiceBonus: string): number => {
-  const match = practiceBonus.match(/\+(\d+)/);
-  return match ? Math.max(0, Number.parseInt(match[1] ?? "0", 10)) : 0;
-};
-
 /**
  * Converts a purchased song into explicitly-timed effects. Practice/SP effects
  * activate immediately and therefore use the current remaining-training
@@ -807,23 +867,22 @@ export const acquiredEffectsForSong = ({
     beforeLive: true,
     remainingTrainingsByFacility,
   });
+  const practiceEffect = song.practiceBonus
+    ? parseSongPracticeEffect(song.practiceBonus)
+    : null;
 
-  const skillPointTrainingMatch = song.practiceBonus?.match(
-    /^skill pts? training \+(\d+)/i,
-  );
   if (
     roles.includes("sp3-target") ||
     roles.includes("sp2-target") ||
-    skillPointTrainingMatch
+    practiceEffect?.kind === "training-skill-point"
   ) {
     const magnitude = roles.includes("sp3-target")
       ? 3
       : roles.includes("sp2-target")
         ? 2
-        : Math.max(
-            0,
-            Number.parseInt(skillPointTrainingMatch?.[1] ?? "0", 10),
-          );
+        : practiceEffect?.kind === "training-skill-point"
+          ? practiceEffect.amount
+          : 0;
     effects.push({
       kind: "sp-training",
       magnitude,
@@ -833,27 +892,20 @@ export const acquiredEffectsForSong = ({
         Math.max(1, friendshipSongMultiplier) *
         practiceMoment.remainingTrainingOpportunities,
     });
-  } else if (song.practiceBonus) {
-    const dynamicPractice =
-      /^(speed|stamina|power|guts|wisdom) training \+\d+/i.test(
-        song.practiceBonus,
-      );
-    if (dynamicPractice) {
-      const magnitude = parseTrainingMagnitude(song.practiceBonus);
-      const value = remainingTrainingsByFacility
-        ? structuralTrainingValue(
-            song.practiceBonus,
-            remainingTrainingsByFacility,
-            friendshipSongMultiplier,
-          )
-        : 0;
-      effects.push({
-        kind: "practice",
-        magnitude,
-        activation: practiceMoment,
-        effectiveTrainingExposure: value,
-      });
-    }
+  } else if (practiceEffect?.kind === "training-stat") {
+    const value = remainingTrainingsByFacility
+      ? structuralTrainingValue(
+          song.practiceBonus ?? "",
+          remainingTrainingsByFacility,
+          friendshipSongMultiplier,
+        )
+      : 0;
+    effects.push({
+      kind: "practice",
+      magnitude: practiceEffect.amount,
+      activation: practiceMoment,
+      effectiveTrainingExposure: value,
+    });
   }
 
   const friendshipMagnitude = roles.includes("friendship-10")
@@ -917,26 +969,21 @@ export const structuralTrainingValue = (
   friendshipSongMultiplier: number,
 ): number => {
   const phi = Math.max(1, friendshipSongMultiplier);
-  const statMatch = practiceBonus.match(
-    /^(speed|stamina|power|guts|wisdom) training \+(\d+)/i,
-  );
-  if (statMatch) {
-    const stat = statMatch[1].toLowerCase() as TrainingStat;
-    const amount = Math.max(0, Number.parseInt(statMatch[2] ?? "0", 10));
-    const producingTrainings = STAT_PRODUCING_FACILITIES[stat].reduce(
+  const effect = parseSongPracticeEffect(practiceBonus);
+  if (!effect) return 0;
+  if (effect.kind === "training-stat") {
+    const producingTrainings = STAT_PRODUCING_FACILITIES[effect.stat].reduce(
       (sum, facility) => sum + remainingTrainingsByFacility[facility],
       0,
     );
-    return amount * phi * producingTrainings;
+    return effect.amount * phi * producingTrainings;
   }
-  const skillPointMatch = practiceBonus.match(/^skill pts? training \+(\d+)/i);
-  if (skillPointMatch) {
-    const amount = Math.max(0, Number.parseInt(skillPointMatch[1] ?? "0", 10));
+  if (effect.kind === "training-skill-point") {
     const totalTrainings = TRAINING_FACILITIES.reduce(
       (sum, facility) => sum + remainingTrainingsByFacility[facility],
       0,
     );
-    return amount * phi * totalTrainings;
+    return effect.amount * phi * totalTrainings;
   }
   return 0;
 };

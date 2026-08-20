@@ -6,24 +6,20 @@ import {
   evaluateHuntDecision,
 } from "../src/solver/hunt-state.ts";
 
-test("temporary unfundability before third miss does not abandon hunt", () => {
+test("temporary zero-income unfundability does not abandon hunt", () => {
   const state = {
     ...createHuntState(["yume-wo-kakeru"]),
-    pagesSeenWithoutTarget: 1,
+    pagesSeenWithoutTarget: 6,
   };
 
   const decision = evaluateHuntDecision({
     state,
-    riskProfile: "standard",
+    targetAppearanceProbability: 0.4,
+    zeroIncomeFundabilityProbability: 0,
     findAndFundProbability: 0,
-    targetTrainingExposure: 66,
-    expectedFutureCommittedCost: 40,
-    immediateFillerCost: 0,
-    reserveOpportunityCost: 0,
-    techniquesToNextSong: 1,
   });
 
-  assert.equal(decision.expectedTargetValue, 0);
+  assert.equal(decision.fundingAssessment, "future-income-required");
   assert.equal(decision.action, "continue-hunt");
 });
 

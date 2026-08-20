@@ -69,6 +69,7 @@ const evaluate = (
     candidates,
     techniquesRemaining: 4,
     currentSongs,
+    songsThisSection: 3,
     totalSongs: 3,
     plan,
     trials,

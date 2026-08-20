@@ -12,7 +12,6 @@ export const GATE18_STAT_DELTA = 50;
 export const STAT_POINT_UTILITY = 1;
 
 export type UtilityParameterId =
-  | "FRIENDSHIP_EXPOSURE_STAT_RATE"
   | "SKILL_POINT_UTILITY"
   | "SCENARIO_SKILL_UTILITY"
   | "SCENARIO_EVENT_UTILITY";
@@ -27,19 +26,11 @@ export type UtilityParameter = {
 export type UtilityCalibration = Record<UtilityParameterId, UtilityParameter>;
 
 export const DEFAULT_UTILITY_CALIBRATION: UtilityCalibration = {
-  FRIENDSHIP_EXPOSURE_STAT_RATE: {
-    value: 0.52,
-    kind: "bounded",
-    minimum: 0,
-    calibrationInterval: [0.3, 0.8],
-  },
   SKILL_POINT_UTILITY: { value: 1, kind: "free", minimum: 0 },
   SCENARIO_SKILL_UTILITY: { value: 0, kind: "free", minimum: 0 },
   SCENARIO_EVENT_UTILITY: { value: 0, kind: "free", minimum: 0 },
 };
 
-export const FRIENDSHIP_EXPOSURE_STAT_RATE =
-  DEFAULT_UTILITY_CALIBRATION.FRIENDSHIP_EXPOSURE_STAT_RATE.value;
 export const SKILL_POINT_UTILITY =
   DEFAULT_UTILITY_CALIBRATION.SKILL_POINT_UTILITY.value;
 export const SCENARIO_SKILL_UTILITY =
@@ -62,9 +53,13 @@ export type UtilityLinearTerms = {
 
 export type UtilityUnprojectedReward = {
   id: "gate16" | "gate18";
-  reason: "not-projected";
+  reason: "not-crossed";
 };
 
+/**
+ * T1b contains only deterministic consequences of the current action.
+ * Generic training/click projections are intentionally absent and live in T2.
+ */
 export type UtilityAssessment = {
   tieId: string;
   projectionPolicy: typeof PROJECTION_POLICY;
@@ -79,6 +74,29 @@ export type UtilityAssessment = {
   unprojectedRewards: readonly UtilityUnprojectedReward[];
 };
 
+/**
+ * T2 is deliberately not a scalar utility. These values are generic behavioural
+ * projections used only after factual/structural layers cannot separate two
+ * actions. Friendship exposure is retained for diagnostics, but does not vote:
+ * Friendship priority comes from structuralTier, not a fake stat conversion.
+ */
+export type GenericProjectionAssessment = {
+  tieId: string;
+  expectedPracticeStatDelta: number;
+  expectedSkillPoints: number;
+  friendshipExposure: number;
+};
+
+/** Full decision seam used by song policy after P3b2. */
+export type LayeredDecisionAssessment = {
+  tieId: string;
+  utility: UtilityAssessment;
+  structuralTier: number;
+  visibleSongCost: number;
+  futureTechniqueCostExpected: number;
+  t2: GenericProjectionAssessment;
+};
+
 const number = (outcome: HorizonOutcome, metric: HorizonMetricId): number => {
   const component = horizonMetricComponent(outcome, metric);
   if (!component) return 0;
@@ -88,27 +106,11 @@ const number = (outcome: HorizonOutcome, metric: HorizonMetricId): number => {
   );
 };
 
-const hasMetric = (outcome: HorizonOutcome, metric: HorizonMetricId): boolean =>
-  outcome.components.some((component) => component.metric === metric);
-
 const zeroCoefficients = (): Record<UtilityParameterId, number> => ({
-  FRIENDSHIP_EXPOSURE_STAT_RATE: 0,
   SKILL_POINT_UTILITY: 0,
   SCENARIO_SKILL_UTILITY: 0,
   SCENARIO_EVENT_UTILITY: 0,
 });
-
-const gateExpected = (
-  outcome: HorizonOutcome,
-  crossedMetric: "gate16-crossed" | "gate18-crossed",
-  reachMetric: "gate16-zero-income-reach" | "gate18-zero-income-reach",
-): { projected: boolean; probability: number } => {
-  if (number(outcome, crossedMetric) > 0) return { projected: true, probability: 1 };
-  if (hasMetric(outcome, reachMetric)) {
-    return { projected: true, probability: Math.max(0, Math.min(1, number(outcome, reachMetric))) };
-  }
-  return { projected: false, probability: 0 };
-};
 
 export const utilityAssessmentFromOutcome = (
   outcome: HorizonOutcome,
@@ -118,95 +120,76 @@ export const utilityAssessmentFromOutcome = (
   const contributions: UtilityContribution[] = [];
   let fixedStatPoints = 0;
 
-  const practice = number(outcome, "expected-practice-stat-delta");
-  if (practice !== 0) {
-    fixedStatPoints += practice;
+  const immediateStats = number(outcome, "immediate-stat-delta");
+  if (immediateStats !== 0) {
+    fixedStatPoints += immediateStats;
     contributions.push({
-      id: "practice-stat-delta",
-      sourceMetric: "expected-practice-stat-delta",
-      value: practice,
-      statPoints: practice,
+      id: "immediate-stat-delta",
+      sourceMetric: "immediate-stat-delta",
+      value: immediateStats,
+      statPoints: immediateStats,
     });
   }
 
-  const skillPoints = number(outcome, "expected-skill-points");
-  if (skillPoints !== 0) {
-    coefficients.SKILL_POINT_UTILITY += skillPoints;
+  const immediateSkillPoints = number(outcome, "immediate-skill-points");
+  if (immediateSkillPoints !== 0) {
+    coefficients.SKILL_POINT_UTILITY += immediateSkillPoints;
     contributions.push({
-      id: "skill-points",
-      sourceMetric: "expected-skill-points",
-      value: skillPoints,
-      statPoints: skillPoints * calibration.SKILL_POINT_UTILITY.value,
+      id: "immediate-skill-points",
+      sourceMetric: "immediate-skill-points",
+      value: immediateSkillPoints,
+      statPoints: immediateSkillPoints * calibration.SKILL_POINT_UTILITY.value,
       parameter: "SKILL_POINT_UTILITY",
     });
   }
 
-  const friendship = number(outcome, "friendship-exposure");
-  if (friendship !== 0) {
-    coefficients.FRIENDSHIP_EXPOSURE_STAT_RATE += friendship;
-    contributions.push({
-      id: "friendship-exposure",
-      sourceMetric: "friendship-exposure",
-      value: friendship,
-      statPoints:
-        friendship * calibration.FRIENDSHIP_EXPOSURE_STAT_RATE.value,
-      parameter: "FRIENDSHIP_EXPOSURE_STAT_RATE",
-    });
-  }
-
-  const greatSuccessProbability = Math.max(
-    number(outcome, "great-success-secured"),
-    number(outcome, "great-success-zero-income-reach"),
-  );
-  if (greatSuccessProbability > 0) {
-    const statPoints = greatSuccessProbability * GREAT_SUCCESS_STAT_DELTA;
+  const greatSuccessSecured = number(outcome, "great-success-secured") > 0 ? 1 : 0;
+  if (greatSuccessSecured > 0) {
+    const statPoints = GREAT_SUCCESS_STAT_DELTA;
     fixedStatPoints += statPoints;
     contributions.push({
       id: "great-success",
       sourceMetric: "great-success",
-      value: greatSuccessProbability,
+      value: 1,
       statPoints,
     });
   }
 
-  const gate16 = gateExpected(outcome, "gate16-crossed", "gate16-zero-income-reach");
-  const gate18 = gateExpected(outcome, "gate18-crossed", "gate18-zero-income-reach");
+  const gate16Crossed = number(outcome, "gate16-crossed") > 0 ? 1 : 0;
+  const gate18Crossed = number(outcome, "gate18-crossed") > 0 ? 1 : 0;
   const unprojectedRewards: UtilityUnprojectedReward[] = [];
 
-  if (gate16.projected) {
-    coefficients.SCENARIO_EVENT_UTILITY += gate16.probability;
+  if (gate16Crossed) {
+    coefficients.SCENARIO_EVENT_UTILITY += 1;
     contributions.push({
       id: "gate16",
       sourceMetric: "gate16",
-      value: gate16.probability,
-      statPoints:
-        gate16.probability * calibration.SCENARIO_EVENT_UTILITY.value,
+      value: 1,
+      statPoints: calibration.SCENARIO_EVENT_UTILITY.value,
       parameter: "SCENARIO_EVENT_UTILITY",
     });
   } else {
-    unprojectedRewards.push({ id: "gate16", reason: "not-projected" });
+    unprojectedRewards.push({ id: "gate16", reason: "not-crossed" });
   }
 
-  if (gate18.projected) {
-    const fixed = gate18.probability * GATE18_STAT_DELTA;
-    fixedStatPoints += fixed;
-    coefficients.SCENARIO_SKILL_UTILITY += gate18.probability;
+  if (gate18Crossed) {
+    fixedStatPoints += GATE18_STAT_DELTA;
+    coefficients.SCENARIO_SKILL_UTILITY += 1;
     contributions.push({
       id: "gate18-stat-delta",
       sourceMetric: "gate18",
-      value: gate18.probability,
-      statPoints: fixed,
+      value: 1,
+      statPoints: GATE18_STAT_DELTA,
     });
     contributions.push({
       id: "gate18-skill",
       sourceMetric: "gate18",
-      value: gate18.probability,
-      statPoints:
-        gate18.probability * calibration.SCENARIO_SKILL_UTILITY.value,
+      value: 1,
+      statPoints: calibration.SCENARIO_SKILL_UTILITY.value,
       parameter: "SCENARIO_SKILL_UTILITY",
     });
   } else {
-    unprojectedRewards.push({ id: "gate18", reason: "not-projected" });
+    unprojectedRewards.push({ id: "gate18", reason: "not-crossed" });
   }
 
   const linearTerms: UtilityLinearTerms = { fixedStatPoints, coefficients };
@@ -217,18 +200,6 @@ export const utilityAssessmentFromOutcome = (
       0,
     );
 
-  const friendshipInterval = calibration.FRIENDSHIP_EXPOSURE_STAT_RATE.calibrationInterval;
-  const boundedCalibrationInterval = friendshipInterval
-    ? ([
-        nominalStatPoints +
-          coefficients.FRIENDSHIP_EXPOSURE_STAT_RATE *
-            (friendshipInterval[0] - calibration.FRIENDSHIP_EXPOSURE_STAT_RATE.value),
-        nominalStatPoints +
-          coefficients.FRIENDSHIP_EXPOSURE_STAT_RATE *
-            (friendshipInterval[1] - calibration.FRIENDSHIP_EXPOSURE_STAT_RATE.value),
-      ] as const)
-    : null;
-
   return {
     tieId: outcome.tieId,
     projectionPolicy: PROJECTION_POLICY,
@@ -236,7 +207,7 @@ export const utilityAssessmentFromOutcome = (
     hardState: number(outcome, "hard-state"),
     riskAdmissibleState: number(outcome, "risk-admissible-state"),
     nominalStatPoints,
-    boundedCalibrationInterval,
+    boundedCalibrationInterval: null,
     contributions,
     linearTerms,
     freeParameters: [
@@ -248,9 +219,57 @@ export const utilityAssessmentFromOutcome = (
   };
 };
 
+export const genericProjectionAssessmentFromOutcome = (
+  outcome: HorizonOutcome,
+): GenericProjectionAssessment => ({
+  tieId: outcome.tieId,
+  expectedPracticeStatDelta: number(outcome, "expected-practice-stat-delta"),
+  expectedSkillPoints: number(outcome, "expected-skill-points"),
+  friendshipExposure: number(outcome, "friendship-exposure"),
+});
+
+export const layeredDecisionAssessmentFromOutcome = (
+  outcome: HorizonOutcome,
+  calibration: UtilityCalibration = DEFAULT_UTILITY_CALIBRATION,
+): LayeredDecisionAssessment => ({
+  tieId: outcome.tieId,
+  utility: utilityAssessmentFromOutcome(outcome, calibration),
+  structuralTier: number(outcome, "structural-tier"),
+  visibleSongCost: number(outcome, "visible-song-cost"),
+  futureTechniqueCostExpected: number(outcome, "future-technique-cost-expected"),
+  t2: genericProjectionAssessmentFromOutcome(outcome),
+});
+
 const compareNumber = (left: number, right: number, epsilon = 1e-10): number =>
   Math.abs(left - right) <= epsilon ? 0 : left > right ? 1 : -1;
 
+/** Positive means left is preferred. Friendship exposure is diagnostic-only. */
+export const compareGenericProjectionAssessments = (
+  left: GenericProjectionAssessment,
+  right: GenericProjectionAssessment,
+): number =>
+  compareNumber(left.expectedPracticeStatDelta, right.expectedPracticeStatDelta) ||
+  compareNumber(left.expectedSkillPoints, right.expectedSkillPoints);
+
+/**
+ * P3b2 decision order. T2 cannot outrank a factual structural difference,
+ * deterministic T1b reward, or the visible purchase expenditure. Future
+ * technique spend remains zero-income telemetry until a named exchange rule is
+ * justified; it must not become another hidden utility model.
+ */
+export const compareLayeredDecisionAssessments = (
+  left: LayeredDecisionAssessment,
+  right: LayeredDecisionAssessment,
+): number =>
+  compareNumber(left.utility.hardState, right.utility.hardState) ||
+  compareNumber(left.utility.riskAdmissibleState, right.utility.riskAdmissibleState) ||
+  compareNumber(left.structuralTier, right.structuralTier) ||
+  compareNumber(left.utility.nominalStatPoints, right.utility.nominalStatPoints) ||
+  compareNumber(right.visibleSongCost, left.visibleSongCost) ||
+  compareGenericProjectionAssessments(left.t2, right.t2) ||
+  (left.tieId === right.tieId ? 0 : left.tieId < right.tieId ? 1 : -1);
+
+/** T1b-only comparison retained for calibration/diagnostic callers. */
 export const compareUtilityAssessments = (
   left: UtilityAssessment,
   right: UtilityAssessment,

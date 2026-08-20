@@ -8,9 +8,9 @@ import {
   type OutcomeUncertainty,
 } from "./horizon-outcome.ts";
 import {
-  utilityAssessmentFromOutcome,
-  type UtilityAssessment,
-} from "./utility-model.ts";
+  terminalCompatUtilityAssessmentFromOutcome,
+  type TerminalCompatUtilityAssessment,
+} from "./terminal-compat-utility.ts";
 
 export type TerminalTrialOutcomeInput = {
   tieId: string;
@@ -63,19 +63,19 @@ export const terminalHorizonOutcomeFromTrial = ({
       outcomeComponent(
         "expected-practice-stat-delta",
         result.practiceTrainingExposure,
-        "zero-income-projection",
+        "generic-behavioral-projection",
         uncertainty,
       ),
       outcomeComponent(
         "expected-skill-points",
         result.lessonSkillPoints + result.spTrainingExposure,
-        "zero-income-projection",
+        "generic-behavioral-projection",
         uncertainty,
       ),
       outcomeComponent(
         "friendship-exposure",
         result.friendshipTrainingExposure,
-        "zero-income-projection",
+        "generic-behavioral-projection",
         uncertainty,
       ),
       outcomeComponent(
@@ -128,5 +128,5 @@ export const terminalHorizonOutcomeFromTrial = ({
 
 export const terminalUtilityFromTrial = (
   input: TerminalTrialOutcomeInput,
-): UtilityAssessment =>
-  utilityAssessmentFromOutcome(terminalHorizonOutcomeFromTrial(input));
+): TerminalCompatUtilityAssessment =>
+  terminalCompatUtilityAssessmentFromOutcome(terminalHorizonOutcomeFromTrial(input));

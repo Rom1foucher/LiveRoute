@@ -33,6 +33,10 @@ const analysis = (
 ): AnalysisResult => ({
   valid: true,
   objective: "priority-song",
+  physicalAffordable: true,
+  immediateFundingGap: balance({}),
+  weightedFundingGap: 0,
+  zeroIncomeFundabilityProbability: goalProbability,
   goalProbability,
   jointGoalProbability: Math.min(goalProbability, reachProbability),
   conditionalGoalProbability:

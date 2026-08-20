@@ -7,6 +7,7 @@ import {
 } from "../src/solver/horizon-outcome.ts";
 import {
   decisionVectorFromUtilityAssessment,
+  genericProjectionAssessmentFromOutcome,
   utilityAssessmentFromOutcome,
 } from "../src/solver/utility-model.ts";
 import type { SongPolicyEvaluation } from "../src/solver/song-policy.ts";
@@ -56,6 +57,7 @@ const policy = (
     abandonsHunt: false,
     horizonOutcome,
     utilityAssessment,
+    projectionAssessment: genericProjectionAssessmentFromOutcome(horizonOutcome),
     decisionVector: decisionVectorFromUtilityAssessment(utilityAssessment),
     nextSectionReadiness: null,
     valueOutcome: {

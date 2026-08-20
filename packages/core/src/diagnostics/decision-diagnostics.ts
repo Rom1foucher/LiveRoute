@@ -43,6 +43,7 @@ export type DiagnosticUnavailableReason =
   | "not-materialized-on-analysis-path"
   | "not-materialized-on-song-policy-path"
   | "not-materialized-on-terminal-aggregate"
+  | "terminal-compatibility-path"
   | "conditioning-event-unavailable";
 
 export type DiagnosticAvailability<T> =
@@ -124,12 +125,23 @@ export type CanonicalT1bDiagnostics = {
   breakpoints: readonly UtilityBreakpoint[];
 };
 
+export type CanonicalT2Diagnostics = {
+  expectedPracticeStatDelta: number;
+  expectedSkillPoints: number;
+  friendshipExposure: number;
+  /** Friendship is retained as telemetry; structuralTier owns its priority. */
+  friendshipExposureAffectsRanking: false;
+};
+
 export type DecisionSeparationLayer =
   | "action-validity"
   | "physical-feasibility"
   | "hard-state"
   | "risk-admissibility"
+  | "structural-tier"
   | "utility"
+  | "visible-song-cost"
+  | "generic-projection"
   | "robustness"
   | "stable-tie-break"
   | "legacy-technique-ranking"
@@ -158,6 +170,7 @@ export type CanonicalDecisionDiagnostics = {
   schema: typeof DECISION_DIAGNOSTIC_SCHEMA;
   modelCoverage:
     | "full-t1a-t1b"
+    | "full-t1a-t1b-t2"
     | "physical-projection-only"
     | "terminal-aggregate";
   action: {
@@ -173,6 +186,7 @@ export type CanonicalDecisionDiagnostics = {
   funding: CanonicalFundingDiagnostics;
   t1a: DiagnosticAvailability<CanonicalT1aDiagnostics>;
   t1b: DiagnosticAvailability<CanonicalT1bDiagnostics>;
+  t2: DiagnosticAvailability<CanonicalT2Diagnostics>;
   gates: DiagnosticAvailability<readonly CanonicalGateDiagnostics[]>;
   robustness: CanonicalRobustnessDiagnostics;
   separation: {
@@ -367,7 +381,45 @@ const firstUtilitySeparation = (
   if (left.riskAdmissibleState !== right.riskAdmissibleState) {
     return "risk-admissibility";
   }
+  const leftStructural = horizonMetricComponent(
+    candidate.horizonOutcome,
+    "structural-tier",
+  )?.value;
+  const rightStructural = horizonMetricComponent(
+    peer.horizonOutcome,
+    "structural-tier",
+  )?.value;
+  if (
+    typeof leftStructural === "number" &&
+    typeof rightStructural === "number" &&
+    leftStructural !== rightStructural
+  ) {
+    return "structural-tier";
+  }
   if (left.nominalStatPoints !== right.nominalStatPoints) return "utility";
+  const leftCost = horizonMetricComponent(
+    candidate.horizonOutcome,
+    "visible-song-cost",
+  )?.value;
+  const rightCost = horizonMetricComponent(
+    peer.horizonOutcome,
+    "visible-song-cost",
+  )?.value;
+  if (
+    typeof leftCost === "number" &&
+    typeof rightCost === "number" &&
+    leftCost !== rightCost
+  ) {
+    return "visible-song-cost";
+  }
+  if (
+    candidate.projectionAssessment.expectedPracticeStatDelta !==
+      peer.projectionAssessment.expectedPracticeStatDelta ||
+    candidate.projectionAssessment.expectedSkillPoints !==
+      peer.projectionAssessment.expectedSkillPoints
+  ) {
+    return "generic-projection";
+  }
   if (coReason) return "robustness";
   if (left.tieId !== right.tieId) return "stable-tie-break";
   return "not-separated";
@@ -405,7 +457,7 @@ export const canonicalSongDecisionDiagnostics = (
 
   return {
     schema: DECISION_DIAGNOSTIC_SCHEMA,
-    modelCoverage: "full-t1a-t1b",
+    modelCoverage: "full-t1a-t1b-t2",
     action: {
       id: candidate.id,
       kind: candidate.action,
@@ -459,6 +511,13 @@ export const canonicalSongDecisionDiagnostics = (
       calibration: calibrationSnapshot(),
       breakpoints: breakpoints.map((breakpoint) => ({ ...breakpoint })),
     }),
+    t2: available({
+      expectedPracticeStatDelta:
+        candidate.projectionAssessment.expectedPracticeStatDelta,
+      expectedSkillPoints: candidate.projectionAssessment.expectedSkillPoints,
+      friendshipExposure: candidate.projectionAssessment.friendshipExposure,
+      friendshipExposureAffectsRanking: false,
+    }),
     gates: available(gateDiagnosticsFromSong(candidate)),
     robustness: {
       policy: ROBUSTNESS_POLICY,
@@ -487,6 +546,11 @@ const appearanceProbabilityFromAnalysis = (result: AnalysisResult): number =>
       ? result.anySongShownProbability
       : 1;
 
+const isUtilityParameterId = (
+  parameter: string,
+): parameter is UtilityParameterId =>
+  Object.prototype.hasOwnProperty.call(DEFAULT_UTILITY_CALIBRATION, parameter);
+
 const terminalRobustness = (
   terminal: TerminalTechniqueDecisionSummary | undefined,
 ): CanonicalRobustnessDiagnostics => {
@@ -512,12 +576,13 @@ const terminalRobustness = (
     paired: terminal?.pairedUtility ?? null,
     riskAdmission,
     calibration: calibrationSnapshot(),
-    breakpoints: (terminal?.calibrationBreakpoints ?? []).map((breakpoint) => ({
-      ...breakpoint,
-    })),
+    breakpoints: (terminal?.calibrationBreakpoints ?? [])
+      .filter((breakpoint) => isUtilityParameterId(breakpoint.parameter))
+      .map((breakpoint) => ({ ...breakpoint, parameter: breakpoint.parameter as UtilityParameterId })),
     coRecommendationReason: terminal?.coRecommendationReason ?? null,
-    calibrationSensitiveParameters:
-      terminal?.calibrationSensitiveParameters ?? [],
+    calibrationSensitiveParameters: (
+      terminal?.calibrationSensitiveParameters ?? []
+    ).filter(isUtilityParameterId),
   };
 };
 
@@ -611,6 +676,11 @@ export const canonicalAnalysisDecisionDiagnostics = ({
   t1b: unavailable(
     result.terminalDecision
       ? "not-materialized-on-terminal-aggregate"
+      : "not-materialized-on-analysis-path",
+  ),
+  t2: unavailable(
+    result.terminalDecision
+      ? "terminal-compatibility-path"
       : "not-materialized-on-analysis-path",
   ),
   gates: unavailable("not-materialized-on-analysis-path"),

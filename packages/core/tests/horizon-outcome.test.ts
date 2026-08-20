@@ -12,11 +12,11 @@ import {
 } from "../src/solver/horizon-outcome.ts";
 import { analyzeSongSelection } from "../src/solver/song-policy.ts";
 import {
-  compareUtilityAssessments,
+  compareGenericProjectionAssessments,
   decisionVectorFromUtilityAssessment,
+  genericProjectionAssessmentFromOutcome,
   utilityAssessmentFromOutcome,
 } from "../src/solver/utility-model.ts";
-import { compareDecisionVectors } from "../src/solver/value.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
   dance: 0,
@@ -83,7 +83,7 @@ test("P3b1 rejects per-action unit or transform overrides", () => {
   );
 });
 
-test("P3b2 removes the BUY-only floor: raw stat deltas remain ordered", () => {
+test("P3b2 garde les projections de training hors de T1b et les ordonne seulement en T2", () => {
   const outcome = (tieId: string, value: number) =>
     createHorizonOutcome({
       tieId,
@@ -97,7 +97,7 @@ test("P3b2 removes the BUY-only floor: raw stat deltas remain ordered", () => {
         outcomeComponent(
           "expected-practice-stat-delta",
           value,
-          "zero-income-projection",
+          "generic-behavioral-projection",
         ),
       ],
     });
@@ -105,11 +105,49 @@ test("P3b2 removes the BUY-only floor: raw stat deltas remain ordered", () => {
   const low = outcome("low", 39.9);
 
   assert.equal(horizonMetricNumber(high, "expected-practice-stat-delta"), 41.8);
+  assert.equal(
+    utilityAssessmentFromOutcome(high).nominalStatPoints,
+    utilityAssessmentFromOutcome(low).nominalStatPoints,
+  );
   assert.ok(
-    compareUtilityAssessments(
-      utilityAssessmentFromOutcome(high),
-      utilityAssessmentFromOutcome(low),
+    compareGenericProjectionAssessments(
+      genericProjectionAssessmentFromOutcome(high),
+      genericProjectionAssessmentFromOutcome(low),
     ) > 0,
+  );
+});
+
+test("P3b2 garde friendshipExposure diagnostique et sans vote en T2", () => {
+  const outcome = (tieId: string, friendshipExposure: number) =>
+    createHorizonOutcome({
+      tieId,
+      components: [
+        outcomeComponent("hard-state", 1, "deterministic-consequence"),
+        outcomeComponent(
+          "risk-admissible-state",
+          1,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "friendship-exposure",
+          friendshipExposure,
+          "generic-behavioral-projection",
+        ),
+      ],
+    });
+  const high = outcome("same", 500);
+  const low = outcome("same", 0);
+
+  assert.equal(
+    utilityAssessmentFromOutcome(high).nominalStatPoints,
+    utilityAssessmentFromOutcome(low).nominalStatPoints,
+  );
+  assert.equal(
+    compareGenericProjectionAssessments(
+      genericProjectionAssessmentFromOutcome(high),
+      genericProjectionAssessmentFromOutcome(low),
+    ),
+    0,
   );
 });
 

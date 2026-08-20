@@ -1,6 +1,7 @@
 import {
   TOKEN_KEYS,
   canAfford,
+  immediatePracticeRewards,
   structuralTrainingValue,
   totalCost,
   type Balance,
@@ -13,29 +14,25 @@ import {
   structuralTier,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
-import {
-  FRIENDSHIP_EXPOSURE_STAT_RATE,
-  SKILL_POINT_UTILITY,
-} from "./utility-model.ts";
+import { SKILL_POINT_UTILITY } from "./utility-model.ts";
 
 export type CarriedSongRankMetrics = {
-  /** P3b2 nominal T1b utility. P2 cost metrics are fallback only. */
-  utilityStatPoints: number;
+  /** Deterministic T1b reward of buying this carried song. */
+  immediateUtilityStatPoints: number;
   target: 0 | 1;
   structuralTier: number;
   weightedCost: number;
   scarcityNormalisedCost: number;
   totalCost: number;
+  /** T2 generic behavioural projections. */
   expectedPracticeStatDelta: number;
+  expectedSkillPoints: number;
 };
 
 export type RankedCarriedSong = {
   song: SongTarget;
   metrics: CarriedSongRankMetrics;
 };
-
-const STAT_TRAINING_BONUS =
-  /^(speed|stamina|power|guts|wisdom) training \+\d+/i;
 
 const weightedCost = (
   cost: Balance,
@@ -75,7 +72,8 @@ const expectedPracticeStatDelta = ({
   remainingTrainingsByFacility: RemainingTrainingsByFacility;
   friendshipSongMultiplier: number;
 }): number => {
-  if (!song.practiceBonus || !STAT_TRAINING_BONUS.test(song.practiceBonus)) {
+  if (!song.practiceBonus) return 0;
+  if (!/^(speed|stamina|power|guts|wisdom) training \+\d+$/i.test(song.practiceBonus)) {
     return 0;
   }
   return structuralTrainingValue(
@@ -85,8 +83,7 @@ const expectedPracticeStatDelta = ({
   );
 };
 
-
-const carriedSongUtilityStatPoints = ({
+const expectedSkillPoints = ({
   song,
   remainingTrainingsByFacility,
   friendshipSongMultiplier,
@@ -95,41 +92,30 @@ const carriedSongUtilityStatPoints = ({
   remainingTrainingsByFacility: RemainingTrainingsByFacility;
   friendshipSongMultiplier: number;
 }): number => {
-  const practiceStats = expectedPracticeStatDelta({
-    song,
+  if (!song.practiceBonus || !/^skill pts? training \+\d+$/i.test(song.practiceBonus)) {
+    return 0;
+  }
+  return structuralTrainingValue(
+    song.practiceBonus,
     remainingTrainingsByFacility,
     friendshipSongMultiplier,
-  });
-  const skillPointTraining =
-    song.practiceBonus && /^skill pts? training \+\d+/i.test(song.practiceBonus)
-      ? structuralTrainingValue(
-          song.practiceBonus,
-          remainingTrainingsByFacility,
-          friendshipSongMultiplier,
-        )
-      : 0;
-  const horizon = Object.values(remainingTrainingsByFacility).reduce(
-    (sum, value) => sum + value,
-    0,
   );
-  const friendshipMagnitude = song.roles?.includes("friendship-10")
-    ? 10
-    : song.roles?.includes("friendship-5")
-      ? 5
-      : 0;
+};
+
+const immediateUtilityStatPoints = (song: SongTarget): number => {
+  const immediate = immediatePracticeRewards(song.practiceBonus);
   return (
-    practiceStats +
-    (25 + skillPointTraining) * SKILL_POINT_UTILITY +
-    friendshipMagnitude * horizon * FRIENDSHIP_EXPOSURE_STAT_RATE
+    immediate.statPoints +
+    (25 + immediate.skillPoints) * SKILL_POINT_UTILITY
   );
 };
 
 /**
- * P2 carried-page fallback metrics.
+ * P2 carried-page metrics after P3b2.
  *
- * Shadow prices are cardinal only inside token space and must be computed once
- * from the common parent state. `purchasePointBalance` is intentionally the
- * physical wallet at the later purchase point (post-Live +10 for carryover).
+ * Structural identity and real token expenditure are compared before T2. The
+ * generic training model exists only to avoid meaningless ties such as Guts +1
+ * beating Speed +1 when the factual layers are otherwise indistinguishable.
  */
 export const carriedSongRankMetrics = ({
   song,
@@ -151,11 +137,7 @@ export const carriedSongRankMetrics = ({
   }
 
   return {
-    utilityStatPoints: carriedSongUtilityStatPoints({
-      song,
-      remainingTrainingsByFacility,
-      friendshipSongMultiplier,
-    }),
+    immediateUtilityStatPoints: immediateUtilityStatPoints(song),
     target: isChaseTarget(song, plan) ? 1 : 0,
     structuralTier: structuralTier(song, plan),
     weightedCost: weightedCost(song.cost, commonShadowPrices),
@@ -169,31 +151,28 @@ export const carriedSongRankMetrics = ({
       remainingTrainingsByFacility,
       friendshipSongMultiplier,
     }),
+    expectedSkillPoints: expectedSkillPoints({
+      song,
+      remainingTrainingsByFacility,
+      friendshipSongMultiplier,
+    }),
   };
 };
 
-/**
- * Semantic P2 order, deliberately excluding the deterministic ID fallback.
- * Positive means `left` is preferred.
- */
+/** Positive means `left` is preferred. */
 export const compareCarriedSongMetrics = (
   left: CarriedSongRankMetrics,
   right: CarriedSongRankMetrics,
 ): number =>
-  left.utilityStatPoints - right.utilityStatPoints ||
   left.target - right.target ||
   left.structuralTier - right.structuralTier ||
+  left.immediateUtilityStatPoints - right.immediateUtilityStatPoints ||
   right.weightedCost - left.weightedCost ||
   right.scarcityNormalisedCost - left.scarcityNormalisedCost ||
   right.totalCost - left.totalCost ||
-  left.expectedPracticeStatDelta - right.expectedPracticeStatDelta;
+  left.expectedPracticeStatDelta - right.expectedPracticeStatDelta ||
+  left.expectedSkillPoints - right.expectedSkillPoints;
 
-/**
- * Selects one physically affordable song from a carried page by T1b utility,
- * then uses the P2 transitional chain only as an exact-utility fallback:
- * target -> structural tier -> weighted cost -> wallet-fraction cost -> raw
- * cost -> expected practice stat delta -> id.
- */
 export const selectCarriedPageSong = ({
   songs,
   plan,

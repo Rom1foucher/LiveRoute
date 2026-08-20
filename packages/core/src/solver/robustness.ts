@@ -3,7 +3,6 @@ import {
   pairedMeanInterval,
   type PairedDifferenceStats,
 } from "../monte-carlo.ts";
-import type { UtilityBreakpoint } from "./utility-model.ts";
 
 /** Frozen P4 statistical policy. Changing these values changes solver semantics. */
 export const ROBUSTNESS_POLICY = "grand-live-robustness-v1" as const;
@@ -125,5 +124,5 @@ export const stableCoRecommendationPrimary = <T extends string>(
 };
 
 export const calibrationSensitive = (
-  breakpoints: readonly UtilityBreakpoint[],
+  breakpoints: readonly unknown[],
 ): boolean => breakpoints.length > 0;

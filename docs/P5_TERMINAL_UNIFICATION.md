@@ -43,6 +43,17 @@ actions that the shared physical rollout can still fund. Consequently STOP is
 the opportunity baseline by construction: `U(PUSH) - U(STOP)` already contains
 lost future purchases without a second reserve model.
 
+### P3b2 compatibility note
+
+P3b2 later removed generic behavioural projections from the **canonical** song
+T1b scalar. Terminal P5/P4 behaviour was already deployed and empirically used
+as a v1.0.2/v6 golden baseline, so that migration is intentionally not performed
+as an incidental side effect. `terminalUtilityFromTrial()` now delegates to the
+private `terminal-compat-utility.ts` island, which preserves the historical
+terminal scalar until a dedicated replay-gated terminal migration is performed.
+The common `HorizonOutcome` mechanics remain shared; only the terminal scalar
+transform is temporarily compatibility-scoped.
+
 The removed C4-only code is:
 
 - `evaluateTerminalC4Value()`;

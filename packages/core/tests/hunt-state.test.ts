@@ -57,61 +57,72 @@ test("PR-6 : une page contenant la cible ne compte pas comme miss", () => {
   assert.equal(observed?.pagesSeenWithoutTarget, 0);
 });
 
-test("PR-6 : coût technique et fillers sont persistés sans devenir un bonus de sunk cost", () => {
+test("P3b2 : coût technique et fillers restent de la télémétrie de HUNT", () => {
   const base = createHuntState(["SP3"]);
   const afterTechnique = recordHuntTechniquePurchase(base, cost(21, 12));
   const afterFiller = recordHuntFillerPurchase(afterTechnique);
   assert.equal(afterFiller?.committedTechniqueCost.dance, 21);
   assert.equal(afterFiller?.committedTechniqueCost.visual, 12);
   assert.equal(afterFiller?.fillerPurchasesWhileHunting, 1);
-});
 
-test("P3b2 : après le troisième miss une cible à utilité positive peut encore justifier HUNT", () => {
-  const state = {
-    ...createHuntState(["SP3"]),
-    pagesSeenWithoutTarget: 3,
-  };
   const decision = evaluateHuntDecision({
-    state,
-    findAndFundProbability: 0.6,
-    targetUtilityStatPoints: 90,
+    state: afterFiller!,
+    targetAppearanceProbability: 0.4,
+    zeroIncomeFundabilityProbability: 0.25,
+    findAndFundProbability: 0.1,
   });
   assert.equal(decision.action, "continue-hunt");
-  assert.equal(decision.expectedTargetValue, 54);
-  assert.equal(decision.netValue, 54);
+  assert.equal(decision.committedTechniqueTokens, 33);
+  assert.equal(decision.fillerPurchasesWhileHunting, 1);
 });
 
-test("P3b2 : le coût, les fillers et la profondeur ne deviennent pas des pseudo-stat-points", () => {
-  const state = {
-    ...createHuntState(["SP3"]),
-    pagesSeenWithoutTarget: 3,
-    fillerPurchasesWhileHunting: 5,
-    committedTechniqueCost: cost(200, 200),
-  };
-  const decision = evaluateHuntDecision({
-    state,
-    findAndFundProbability: 0.12,
-    targetUtilityStatPoints: 45,
-  });
-  assert.equal(decision.action, "continue-hunt");
-  assert.ok(Math.abs(decision.netValue - 5.4) < 1e-9);
-  assert.equal(decision.missPenalty, 0);
-  assert.equal(decision.fillerPenalty, 0);
-  assert.equal(decision.cycleDepthPenalty, 0);
+test("P3b2 invariant 4 : le compteur brut de misses ne change pas l'admission HUNT", () => {
+  const decisions = [0, 2, 3, 8].map((pagesSeenWithoutTarget) =>
+    evaluateHuntDecision({
+      state: {
+        ...createHuntState(["SP3"]),
+        pagesSeenWithoutTarget,
+      },
+      targetAppearanceProbability: 0.45,
+      zeroIncomeFundabilityProbability: 0.2,
+      findAndFundProbability: 0.12,
+    }),
+  );
+
+  assert.ok(decisions.every((decision) => decision.action === "continue-hunt"));
+  assert.ok(
+    decisions.every(
+      (decision) => decision.fundingAssessment === "zero-income-fundable",
+    ),
+  );
 });
 
-test("P3b2 : après le troisième miss un reach réellement nul permet HOLD", () => {
-  const state = {
-    ...createHuntState(["SP3"]),
-    pagesSeenWithoutTarget: 3,
-  };
+test("P3b2 : find-and-fund zero-income nul n'est pas une preuve d'impossibilité", () => {
   const decision = evaluateHuntDecision({
-    state,
+    state: {
+      ...createHuntState(["SP3"]),
+      pagesSeenWithoutTarget: 7,
+    },
+    targetAppearanceProbability: 0.35,
+    zeroIncomeFundabilityProbability: 0,
     findAndFundProbability: 0,
-    targetUtilityStatPoints: 90,
   });
+
+  assert.equal(decision.action, "continue-hunt");
+  assert.equal(decision.fundingAssessment, "future-income-required");
+  assert.equal(decision.findAndFundProbability, 0);
+});
+
+test("P3b2 : une cible sans aucune apparence possible peut être abandonnée", () => {
+  const decision = evaluateHuntDecision({
+    state: createHuntState(["SP3"]),
+    targetAppearanceProbability: 0,
+    zeroIncomeFundabilityProbability: null,
+    findAndFundProbability: 0,
+  });
+
   assert.equal(decision.action, "abandon-to-hold");
-  assert.equal(decision.netValue, 0);
+  assert.equal(decision.fundingAssessment, "unreachable");
 });
 
 test("PR-6 : changer de cible réinitialise l'état de chasse", () => {

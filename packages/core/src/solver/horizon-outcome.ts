@@ -19,7 +19,8 @@ export type OutcomeUnit =
 export type OutcomeProvenance =
   | "observed"
   | "deterministic-consequence"
-  | "zero-income-projection";
+  | "zero-income-projection"
+  | "generic-behavioral-projection";
 
 export type OutcomeInterval = {
   lower: number;
@@ -51,6 +52,8 @@ export type HorizonMetricId =
   | "hard-state"
   | "risk-admissible-state"
   | "structural-tier"
+  | "immediate-stat-delta"
+  | "immediate-skill-points"
   | "expected-practice-stat-delta"
   | "expected-skill-points"
   | "friendship-exposure"
@@ -106,6 +109,8 @@ const metricContracts = {
   "hard-state": countMetric,
   "risk-admissible-state": countMetric,
   "structural-tier": countMetric,
+  "immediate-stat-delta": { unit: "stat-point", transform: "identity" },
+  "immediate-skill-points": { unit: "skill-point", transform: "identity" },
   "expected-practice-stat-delta": {
     unit: "stat-point",
     transform: "identity",

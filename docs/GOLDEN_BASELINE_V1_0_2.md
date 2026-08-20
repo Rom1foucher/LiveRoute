@@ -30,7 +30,9 @@ The classified selector manifest is:
 packages/core/fixtures/golden-v1.0.2-checkpoints.json
 ```
 
-It currently covers three logical runs:
+It currently contains **25 accepted checkpoints** across three logical runs. Six of those checkpoints pin the C4 terminal PUSH/STOP boundary directly from `terminalDecision`, so the golden baseline protects bounded aggression rather than only the downstream user choices.
+
+It covers:
 
 - `e75f054d-ff78-4f9c-b4ae-f2f85f4babd6`;
 - the first logical run inside `ec223cf4-286d-4ea7-8df9-2c2115e1cc7a`;
@@ -72,6 +74,7 @@ The extractor:
 - finds exactly one record for each selector;
 - rejects wrong session, sequence, state hash, policy or ruleset;
 - validates classified historical choices such as `choice.id` and `matchedRecommendation`;
+- validates terminal evidence by `candidateId + action` (`expose-and-carry` / `stop-now`) when a checkpoint pins a C4 PUSH/STOP boundary;
 - emits the complete selected state/recommendation/choice evidence without pretending it is a current solver oracle.
 
 If a selector is missing or duplicated, extraction fails. Nothing is reconstructed from token vectors alone.
@@ -111,6 +114,7 @@ Examples:
 - A real C1 carry into C2 is valuable baseline behaviour.
 - Any legacy zero-income Friendship stat-equivalent used inside that decision is not golden.
 - Deep C4 continuation that produced strong runs is valuable baseline behaviour.
+- The accepted terminal sequence deliberately contains both PUSH and STOP checkpoints: the golden contract is **bounded aggression**, not "always push C4".
 - The old standalone C4 opportunity-cost scalar is not golden.
 
 This is the intended guardrail for the P3b2 cleanup: remove bad reasons without casually losing good decisions.

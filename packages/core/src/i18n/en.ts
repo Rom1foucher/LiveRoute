@@ -144,6 +144,15 @@ export const renderEn = (message: Message): string => {
       return `HUNT abandoned after ${message.pages} missed page(s): ${fixed1(message.probability)} % find & fund, marginal value ${message.netValue.toFixed(1)}`;
     case "reason.huntContinueMarginalValue":
       return `HUNT continues after ${message.pages} missed page(s): ${fixed1(message.probability)} % find & fund, marginal value ${message.netValue >= 0 ? "+" : ""}${message.netValue.toFixed(1)}`;
+    case "reason.huntAbandonUnreachable":
+      return `HUNT abandoned: target appearance is ${fixed1(message.appearanceProbability)} % after ${message.pages} missed page(s)`;
+    case "reason.huntContinueReachability": {
+      const funding =
+        message.fundingAssessment === "future-income-required"
+          ? "current zero-income funding is insufficient; future training income remains unknown"
+          : `zero-income fundability ${message.zeroIncomeFundabilityProbability === null ? "unknown" : `${fixed1(message.zeroIncomeFundabilityProbability)} %`}`;
+      return `HUNT stays active after ${message.pages} missed page(s): ${fixed1(message.appearanceProbability)} % appearance, ${fixed1(message.findAndFundProbability)} % zero-income find & fund; ${funding}`;
+    }
     case "reason.securesGreatSuccess":
       return "secures Great Success";
     case "reason.nextSectionCheckpoint": {

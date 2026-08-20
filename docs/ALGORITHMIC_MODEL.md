@@ -88,20 +88,25 @@ technique spend committed while chasing, and filler purchases made during the
 chase. Re-running OCR or analysis on the same `concertIndex:songCycle` page does
 not count another miss.
 
-The first two misses are treated as normal page variance. Starting with the
-third miss, HUNT no longer receives an automatic structural bonus. The solver
-compares `CONTINUE_HUNT` with `ABANDON_TO_HOLD` from the remaining value only:
+Miss count is telemetry, not a policy threshold. P3b2 explicitly separates
+stopping the **current technique chain** from abandoning the **persistent HUNT**.
+A `buy-stop` can return the player to training while keeping the SP target active
+for the next decision.
 
-```text
-P(find & fund) × remaining SP-training exposure
-- expected future/filler cost
-- PR-5 reserve opportunity cost
-- miss/filler/deep-cycle penalties
-```
+HUNT admission now uses reachability semantics rather than a stat-equivalent
+target value:
 
-Past technique spend is retained in telemetry but is a sunk cost and never a
-reason to continue. A valuable target behind a short, cheap cycle can therefore
-still justify pursuit after three misses; a weak/deep chase is abandoned.
+- target appearance probability is independent from affordability;
+- zero-income fundability/find-and-fund remain diagnostics of the current
+  wallet trajectory;
+- zero zero-income fundability does **not** mean the target is impossible,
+  because future trainings provide unknown non-negative token income;
+- the persistent chase is abandoned automatically only when the target has no
+  modeled appearance probability left or the state was already closed.
+
+Past technique spend, fillers, miss count and cycle depth remain persisted for
+telemetry and replay, but none is converted into pseudo stat-points or a hidden
+continuation threshold.
 
 Once the target is acquired or deliberately abandoned:
 
@@ -174,17 +179,20 @@ compatible quantities into the stat-point numeraire. Hard state and risk
 admission remain discrete gates ahead of utility.
 
 The utility model is `grand-live-stat-numeraire-v1` under projection policy
-`grand-live-zero-income-v1`. It uses:
+`grand-live-zero-income-v1`. Canonical T1b now contains only deterministic
+consequences: immediate stat/Skill Point rewards, secured Great Success and
+gates actually crossed.
 
-- practice-stat delta directly in stat points;
-- Lesson/training Skill Points through the explicit free `SKILL_POINT_UTILITY`;
-- Friendship training exposure through the bounded
-  `FRIENDSHIP_EXPOSURE_STAT_RATE`;
-- Great Success as the discrete 35-stat delta;
-- Gate 16/18 only when crossed or explicitly projected to their deadline.
+Generic future-training quantities (`expectedPracticeStatDelta`, future
+`expectedSkillPoints`, `friendshipExposure`) are `generic-behavioral-projection`.
+The first two are T2 tie-breaks only; Friendship exposure is diagnostic only.
+Friendship remains structurally dominant through `structuralTier`, without
+`FRIENDSHIP_EXPOSURE_STAT_RATE`. Retained tokens and committed token cost remain
+mechanical state, not utility.
 
-not receive fractional gate utility. Retained tokens and committed token cost
-are mechanical state, not utility.
+The terminal P5/P4 path temporarily retains its deployed v6 scalar inside
+`terminal-compat-utility.ts`; this compatibility island is replay-gated and must
+not be reused by new song-policy code.
 
 The compatibility `DecisionVector` still exists for durable diagnostics, but
 both song policy and terminal-technique decisions now rank projected mechanics

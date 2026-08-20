@@ -19,19 +19,21 @@ export type HuntState = {
   lastObservedPageKey?: string;
 };
 
+export type HuntFundingAssessment =
+  | "zero-income-fundable"
+  | "future-income-required"
+  | "unreachable";
+
 export type HuntDecision = {
   action: "continue-hunt" | "abandon-to-hold";
+  /** P(target appears | next page reached), before affordability. */
+  targetAppearanceProbability: number;
+  /** P(target is fundable | target appears and page reached), under zero income. */
+  zeroIncomeFundabilityProbability: number | null;
+  /** Multi-page zero-income P(find and fund), retained as reachability telemetry. */
   findAndFundProbability: number;
-  targetTrainingExposure: number;
-  expectedTargetValue: number;
-  expectedFutureCost: number;
-  reserveOpportunityCost: number;
-  missPenalty: number;
-  fillerPenalty: number;
-  cycleDepthPenalty: number;
-  netValue: number;
-  minimumProbability: number;
-  continuationMargin: number;
+  fundingAssessment: HuntFundingAssessment;
+  /** Historical HUNT counters are diagnostics only; none is an admission threshold. */
   pagesSeenWithoutTarget: number;
   fillerPurchasesWhileHunting: number;
   committedTechniqueTokens: number;
@@ -162,47 +164,53 @@ export const huntPageKey = (concertIndex: number, songCycle: number): string =>
   `${concertIndex}:${songCycle}`;
 
 /**
- * T1b HUNT admission. Token spend and miss depth remain diagnostics only; they
- * are never converted into pseudo stat-points. The projected target utility is
- * already expressed in the common stat-point numeraire.
+ * P3b2 HUNT admission. The persistent chase is abandoned only when the target
+ * is no longer physically reachable in the modeled page law (appearance = 0)
+ * or when the state was already closed. A zero-income funding probability of
+ * zero is *not* proof of impossibility: future trainings generate unknown,
+ * non-negative token income, so the correct action is to stop the current
+ * chain if necessary while keeping HUNT active.
+ *
+ * Miss count, filler count, committed spend and cycle depth remain telemetry.
+ * They never create a hidden threshold or pseudo utility.
  */
 export const evaluateHuntDecision = ({
   state,
+  targetAppearanceProbability,
+  zeroIncomeFundabilityProbability,
   findAndFundProbability,
-  targetUtilityStatPoints,
 }: {
   state: HuntState;
+  targetAppearanceProbability: number;
+  zeroIncomeFundabilityProbability: number | null;
   findAndFundProbability: number;
-  targetUtilityStatPoints: number;
 }): HuntDecision => {
-  const probability = Math.max(
-    0,
-    Math.min(1, Number.isFinite(findAndFundProbability) ? findAndFundProbability : 0),
-  );
-  const targetUtility = Number.isFinite(targetUtilityStatPoints)
-    ? Math.max(0, targetUtilityStatPoints)
-    : 0;
-  const expectedTargetValue = probability * targetUtility;
-  const beforeThirdMiss = state.pagesSeenWithoutTarget < 3;
+  const clampProbability = (value: number): number =>
+    Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+  const appearanceProbability = clampProbability(targetAppearanceProbability);
+  const fundabilityProbability =
+    zeroIncomeFundabilityProbability === null
+      ? null
+      : clampProbability(zeroIncomeFundabilityProbability);
+  const findAndFund = clampProbability(findAndFundProbability);
+
+  const fundingAssessment: HuntFundingAssessment =
+    appearanceProbability <= 0
+      ? "unreachable"
+      : findAndFund > 0 || (fundabilityProbability ?? 0) > 0
+        ? "zero-income-fundable"
+        : "future-income-required";
   const action =
-    state.status === "active" &&
-    (beforeThirdMiss || (probability > 0 && expectedTargetValue > 0))
+    state.status === "active" && fundingAssessment !== "unreachable"
       ? "continue-hunt"
       : "abandon-to-hold";
 
   return {
     action,
-    findAndFundProbability: probability,
-    targetTrainingExposure: targetUtility,
-    expectedTargetValue,
-    expectedFutureCost: 0,
-    reserveOpportunityCost: 0,
-    missPenalty: 0,
-    fillerPenalty: 0,
-    cycleDepthPenalty: 0,
-    netValue: expectedTargetValue,
-    minimumProbability: 0,
-    continuationMargin: 0,
+    targetAppearanceProbability: appearanceProbability,
+    zeroIncomeFundabilityProbability: fundabilityProbability,
+    findAndFundProbability: findAndFund,
+    fundingAssessment,
     pagesSeenWithoutTarget: state.pagesSeenWithoutTarget,
     fillerPurchasesWhileHunting: state.fillerPurchasesWhileHunting,
     committedTechniqueTokens: TOKEN_KEYS.reduce(

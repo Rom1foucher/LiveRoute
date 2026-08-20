@@ -139,7 +139,53 @@
       "category": "c4-push",
       "reviewStatus": "accepted",
       "selector": { "event": "recommendation", "sequence": 139, "stateHash": "C4-9B9E614C" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "expose-and-carry" },
       "reason": "Validated C4 run contains a positive expose-and-carry terminal branch here. Preserve the existence of an aggressive C4 path; do not preserve the historical exposure/net-value arithmetic itself."
+    },
+    {
+      "id": "G102_E75_C4_OPEN_TERMINAL_PUSH",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 110, "stateHash": "C4-4F879D39" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "expose-and-carry" },
+      "reason": "Early C4 terminal projection explicitly recommends continuing toward another page; preserves the strong-run PUSH side without freezing its legacy exposure scalar."
+    },
+    {
+      "id": "G102_E75_C4_CYCLE4_PUSH_2",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 145, "stateHash": "C4-C0ACFA50" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "expose-and-carry" },
+      "reason": "Accepted deep-C4 continuation with near-certain terminal reach. Protects bounded aggression before the later STOP transition."
+    },
+    {
+      "id": "G102_E75_C4_CYCLE4_PUSH_3",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 148, "stateHash": "C4-D0B07702" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "expose-and-carry" },
+      "reason": "Another accepted cycle-4 PUSH in the validated run; useful paired evidence against a blanket conservative terminal policy."
+    },
+    {
+      "id": "G102_E75_C4_CYCLE5_STOP",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 154, "stateHash": "C4-6E60F028" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "stop-now" },
+      "reason": "The same strong run later transitions to STOP when the deep continuation becomes materially worse. Protects bounded, not unconditional, C4 aggression."
+    },
+    {
+      "id": "G102_E75_C4_LATE_STOP",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 167, "stateHash": "C4-DE3DE5FC" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "stop-now" },
+      "reason": "Late-C4 terminal STOP with high page reach but poor continuation value; ensures future layered robustness can still stop despite reachability."
     },
     {
       "id": "G102_E75_C4_FIFTH_SONG",
@@ -212,6 +258,15 @@
       "selector": { "event": "choice", "sequence": 351, "stateHash": "C4-65724289" },
       "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
       "reason": "Accepted deep-C4 technique step. The reviewed run reached seven C4 songs, so P3b2 must not regress into a blanket STOP policy."
+    },
+    {
+      "id": "G102_EC223B_C4_FINAL_STOP",
+      "runId": "GOLDEN_EC223_B_20260815",
+      "category": "c4-terminal",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 400, "stateHash": "C4-068D9CF3" },
+      "expect": { "terminalCandidateId": "2", "terminalAction": "stop-now" },
+      "reason": "Second validated run reaches seven C4 songs then rejects an unsafe/depleted deep continuation. Complements the accepted deep-PUSH checkpoints."
     },
     {
       "id": "G102_EC223B_GL_PYOITTO",

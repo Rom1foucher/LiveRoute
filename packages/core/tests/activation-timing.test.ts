@@ -5,10 +5,14 @@ import {
   contextualSongValues,
   effectExposure,
   estimateRemainingTrainingsByFacility,
+  immediatePracticeRewards,
+  parseSongPracticeEffect,
+  structuralTrainingValue,
   type Balance,
   type SongTarget,
 } from "../src/live-model.ts";
 import { evaluateCrossSectionReadiness } from "../src/solver/cross-section.ts";
+import { SONGS } from "../src/domain/song-data.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
   dance: 0,
@@ -46,6 +50,40 @@ const sp3 = (concertIndex: number) =>
     },
     concertIndex,
   });
+
+
+
+test("P3b2 : chaque Practice Bonus du catalogue a une forme sémantique explicite", () => {
+  const parsed = SONGS.map((song) => ({
+    id: song.id,
+    effect: parseSongPracticeEffect(song.practiceBonus),
+  }));
+  assert.deepEqual(
+    parsed.filter((entry) => entry.effect === null),
+    [],
+  );
+  assert.ok(parsed.some((entry) => entry.effect?.kind === "training-stat"));
+  assert.ok(
+    parsed.some((entry) => entry.effect?.kind === "training-skill-point"),
+  );
+  assert.ok(parsed.some((entry) => entry.effect?.kind === "immediate-stat"));
+  assert.ok(
+    parsed.some((entry) => entry.effect?.kind === "immediate-skill-point"),
+  );
+});
+
+test("P3b2 : au Grand Live un bonus permanent vaut zéro d'horizon, un bonus plat reste immédiat", () => {
+  const noTrainings = { speed: 0, stamina: 0, power: 0, guts: 0, wisdom: 0 };
+  assert.equal(structuralTrainingValue("Speed training +1", noTrainings, 1), 0);
+  assert.deepEqual(immediatePracticeRewards("Speed +26"), {
+    statPoints: 26,
+    skillPoints: 0,
+  });
+  assert.deepEqual(immediatePracticeRewards("Skill Pts +22"), {
+    statPoints: 0,
+    skillPoints: 22,
+  });
+});
 
 test("PR-2 : Friendship C4 garde une exposition positive, Grand Live vaut zéro", () => {
   const c4 = acquiredEffectsForSong({

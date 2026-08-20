@@ -205,7 +205,7 @@ test("P2 scarcityNormalisedCost est la fraction exacte du wallet sans +1 de liss
   );
 });
 
-test("P3b2 fait passer l utilité stat-point avant le fallback de coût P2", () => {
+test("P3b2 garde le coût factuel devant une projection T2 de training", () => {
   const cheap = song("cheap", { dance: 20 });
   const expensiveStats = song(
     "expensive-stats",
@@ -224,7 +224,7 @@ test("P3b2 fait passer l utilité stat-point avant le fallback de coût P2", () 
       purchasePointBalance: rich,
       remainingTrainingsByFacility,
     })?.song.id,
-    "expensive-stats",
+    "cheap",
   );
 });
 
@@ -250,18 +250,18 @@ test("P2 n'injecte pas les Skill Points dans expectedPracticeStatDelta", () => {
 
 
 test("P2 cross-section normalise la rareté sur le wallet post-Live +10", () => {
-  const cheaperAfterTransition = {
+  const cheaperAfterTransition: SongTarget = {
     ...song("dance-carried", { dance: 10 }),
     priority: true,
-    roles: ["friendship-5"] as const,
+    roles: ["friendship-5"],
     utility: 3,
     policyValue: 100,
     liveValue: 5,
   };
-  const cheaperBeforeTransition = {
+  const cheaperBeforeTransition: SongTarget = {
     ...song("vocal-carried", { vocal: 20 }),
     priority: true,
-    roles: ["friendship-5"] as const,
+    roles: ["friendship-5"],
     utility: 3,
     policyValue: 100,
     liveValue: 5,

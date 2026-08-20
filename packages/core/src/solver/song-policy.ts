@@ -1,15 +1,14 @@
 import type { Message, MissingToken } from "../i18n/messages.ts";
 import {
   TOKEN_KEYS,
-  TRAINING_HORIZON_BY_CONCERT,
   acquiredEffectsForSong,
   canAfford,
   createTechniqueSimulationMemo,
   effectExposure,
   estimateRemainingTrainingsByFacility,
   fundingGap,
+  immediatePracticeRewards,
   resolveStrategicObjective,
-  structuralTrainingValue,
   withStructuralTrainingValue,
   runAnalysis,
   subtractCost,
@@ -58,10 +57,13 @@ import {
   type OutcomeUncertainty,
 } from "./horizon-outcome.ts";
 import {
-  compareUtilityAssessments,
+  compareLayeredDecisionAssessments,
   decisionVectorFromUtilityAssessment,
+  genericProjectionAssessmentFromOutcome,
+  layeredDecisionAssessmentFromOutcome,
   utilityAssessmentFromOutcome,
   utilityBreakpointsBetween,
+  type GenericProjectionAssessment,
   type UtilityAssessment,
   type UtilityBreakpoint,
 } from "./utility-model.ts";
@@ -153,12 +155,14 @@ export type SongPolicyEvaluation = {
   /** This terminal action deliberately ends the active SP hunt. */
   abandonsHunt: boolean;
   huntAbandonReason?: Message;
-  /** PR-6 marginal HUNT vs HOLD comparison. */
+  /** Persistent HUNT reachability/funding assessment. */
   huntDecision?: HuntDecision;
   /** T1a canonical typed consequences. */
   horizonOutcome: HorizonOutcome;
-  /** T1b stat-point utility derived from the same outcome. */
+  /** T1b deterministic stat-point utility derived from the same outcome. */
   utilityAssessment: UtilityAssessment;
+  /** T2 generic behavioural projection; never scalarized into T1b. */
+  projectionAssessment: GenericProjectionAssessment;
   /** Compatibility envelope; T1b utility is authoritative whenever this vector is compared. */
   decisionVector: ReturnType<typeof decisionVectorFromUtilityAssessment>;
   nextSectionReadiness: CrossSectionReadinessResult | null;
@@ -461,33 +465,6 @@ export const analyzeSongSelection = (
             visibleSongIds: visibleSongs.map((song) => song.id),
             pageKey: `standalone:${concertIndex}:${nextSongCycle}`,
           });
-  const huntTargetTrainingExposure =
-    plan.mode === "hunt"
-      ? Math.max(
-          0,
-          ...allReserveSongs
-            .filter((song) => isChaseTarget(song, plan))
-            .map((song) => {
-              if (remainingTrainings) {
-                return structuralTrainingValue(
-                  song.practiceBonus ?? "",
-                  remainingTrainings,
-                  friendshipSongMultiplier,
-                );
-              }
-              const gain = song.roles?.includes("sp3-target")
-                ? 3
-                : song.roles?.includes("sp2-target")
-                  ? 2
-                  : 0;
-              const horizon =
-                TRAINING_HORIZON_BY_CONCERT[
-                  Math.max(0, Math.min(4, Math.trunc(concertIndex)))
-                ] ?? 0;
-              return gain * horizon * Math.max(1, friendshipSongMultiplier);
-            }),
-        )
-      : 0;
   const protectedReserveSongs = allReserveSongs.filter((song) =>
     isReserveTarget(song, plan),
   );
@@ -1075,16 +1052,18 @@ export const analyzeSongSelection = (
         plan.mode === "hunt" && !currentIsChaseTarget && huntState
           ? evaluateHuntDecision({
               state: huntState,
+              targetAppearanceProbability: next.prioritySongShownProbability,
+              zeroIncomeFundabilityProbability:
+                next.zeroIncomeFundabilityProbability,
               findAndFundProbability: conditionalTarget,
-              targetUtilityStatPoints: huntTargetTrainingExposure,
             })
           : null;
       const huntAbandonReason: Message | null =
         huntDecision?.action === "abandon-to-hold"
           ? {
-              code: "reason.huntAbandonMarginalValue",
-              probability: huntDecision.findAndFundProbability,
-              netValue: huntDecision.netValue,
+              code: "reason.huntAbandonUnreachable",
+              appearanceProbability:
+                huntDecision.targetAppearanceProbability,
               pages: huntDecision.pagesSeenWithoutTarget,
             }
           : null;
@@ -1221,11 +1200,12 @@ export const analyzeSongSelection = (
             effectivePlanAfterPurchase,
           )
         : coverageAfter;
+      const immediatePractice = immediatePracticeRewards(song.practiceBonus);
+      const immediateSkillPoints = 25 + immediatePractice.skillPoints;
       const horizonExpectedPracticeStatDelta =
         currentPracticeTrainingExposure +
         (nextSectionReadiness?.expectedPracticeTrainingExposure ?? 0);
       const horizonExpectedSkillPoints =
-        25 +
         currentSpTrainingExposure +
         (nextSectionReadiness
           ? nextSectionReadiness.expectedSpTrainingExposure +
@@ -1251,9 +1231,19 @@ export const analyzeSongSelection = (
           ),
           outcomeComponent("structural-tier", tier, "deterministic-consequence"),
           outcomeComponent(
+            "immediate-stat-delta",
+            immediatePractice.statPoints,
+            "deterministic-consequence",
+          ),
+          outcomeComponent(
+            "immediate-skill-points",
+            immediateSkillPoints,
+            "deterministic-consequence",
+          ),
+          outcomeComponent(
             "expected-practice-stat-delta",
             horizonExpectedPracticeStatDelta,
-            "zero-income-projection",
+            "generic-behavioral-projection",
             nextSectionReadiness
               ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
               : { kind: "none" },
@@ -1261,7 +1251,7 @@ export const analyzeSongSelection = (
           outcomeComponent(
             "expected-skill-points",
             horizonExpectedSkillPoints,
-            "zero-income-projection",
+            "generic-behavioral-projection",
             nextSectionReadiness
               ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
               : { kind: "none" },
@@ -1269,7 +1259,7 @@ export const analyzeSongSelection = (
           outcomeComponent(
             "friendship-exposure",
             horizonFriendshipExposure,
-            "zero-income-projection",
+            "generic-behavioral-projection",
             nextSectionReadiness
               ? { kind: "monte-carlo", couplingKey: crossSectionCouplingKey }
               : { kind: "none" },
@@ -1277,9 +1267,9 @@ export const analyzeSongSelection = (
           ...activeHuntComponents(
             currentIsChaseTarget
               ? "acquired-now"
-              : continuing && huntAbandonReason === null
-                ? "preserved"
-                : "abandoned",
+              : abandonsHunt
+                ? "abandoned"
+                : "preserved",
             conditionalTarget,
             huntDecision,
           ),
@@ -1392,9 +1382,13 @@ export const analyzeSongSelection = (
       if (abandonsHunt && huntAbandonReason) reasons.push(huntAbandonReason);
       if (continuing && huntDecision?.action === "continue-hunt") {
         reasons.push({
-          code: "reason.huntContinueMarginalValue",
-          probability: huntDecision.findAndFundProbability,
-          netValue: huntDecision.netValue,
+          code: "reason.huntContinueReachability",
+          appearanceProbability:
+            huntDecision.targetAppearanceProbability,
+          findAndFundProbability: huntDecision.findAndFundProbability,
+          zeroIncomeFundabilityProbability:
+            huntDecision.zeroIncomeFundabilityProbability,
+          fundingAssessment: huntDecision.fundingAssessment,
           pages: huntDecision.pagesSeenWithoutTarget,
         });
       }
@@ -1502,6 +1496,8 @@ export const analyzeSongSelection = (
         huntDecision: huntDecision ?? undefined,
         horizonOutcome,
         utilityAssessment: utilityAssessmentFromOutcome(horizonOutcome),
+        projectionAssessment:
+          genericProjectionAssessmentFromOutcome(horizonOutcome),
         decisionVector: decisionVectorFromUtilityAssessment(
           utilityAssessmentFromOutcome(horizonOutcome),
         ),
@@ -1641,20 +1637,20 @@ export const analyzeSongSelection = (
         outcomeComponent(
           "expected-practice-stat-delta",
           carryNextSectionReadiness?.expectedPracticeTrainingExposure ?? 0,
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         outcomeComponent(
           "expected-skill-points",
           (carryNextSectionReadiness?.expectedSpTrainingExposure ?? 0) +
             (carryNextSectionReadiness?.expectedLessonSkillPoints ?? 0),
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         outcomeComponent(
           "friendship-exposure",
           carryNextSectionReadiness?.expectedFriendshipTrainingExposure ?? 0,
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         ...activeHuntComponents(
@@ -1737,6 +1733,8 @@ export const analyzeSongSelection = (
           : undefined,
       horizonOutcome: carryHorizonOutcome,
       utilityAssessment: utilityAssessmentFromOutcome(carryHorizonOutcome),
+      projectionAssessment:
+        genericProjectionAssessmentFromOutcome(carryHorizonOutcome),
       decisionVector: decisionVectorFromUtilityAssessment(
         utilityAssessmentFromOutcome(carryHorizonOutcome),
       ),
@@ -1855,20 +1853,20 @@ export const analyzeSongSelection = (
         outcomeComponent(
           "expected-practice-stat-delta",
           stopNextSectionReadiness.expectedPracticeTrainingExposure,
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         outcomeComponent(
           "expected-skill-points",
           stopNextSectionReadiness.expectedSpTrainingExposure +
             stopNextSectionReadiness.expectedLessonSkillPoints,
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         outcomeComponent(
           "friendship-exposure",
           stopNextSectionReadiness.expectedFriendshipTrainingExposure,
-          "zero-income-projection",
+          "generic-behavioral-projection",
           { kind: "monte-carlo", couplingKey: crossSectionCouplingKey },
         ),
         ...activeHuntComponents("abandoned"),
@@ -1925,6 +1923,8 @@ export const analyzeSongSelection = (
           : undefined,
       horizonOutcome: stopHorizonOutcome,
       utilityAssessment: utilityAssessmentFromOutcome(stopHorizonOutcome),
+      projectionAssessment:
+        genericProjectionAssessmentFromOutcome(stopHorizonOutcome),
       decisionVector: decisionVectorFromUtilityAssessment(
         utilityAssessmentFromOutcome(stopHorizonOutcome),
       ),
@@ -2048,6 +2048,8 @@ export const analyzeSongSelection = (
       abandonsHunt: false,
       horizonOutcome: finalStopHorizonOutcome,
       utilityAssessment: utilityAssessmentFromOutcome(finalStopHorizonOutcome),
+      projectionAssessment:
+        genericProjectionAssessmentFromOutcome(finalStopHorizonOutcome),
       decisionVector: decisionVectorFromUtilityAssessment(
         utilityAssessmentFromOutcome(finalStopHorizonOutcome),
       ),
@@ -2116,7 +2118,6 @@ export const analyzeSongSelection = (
     const waitHuntAbandonReason =
       plan.mode === "hunt" &&
       !visibleChaseTarget &&
-      (huntState?.pagesSeenWithoutTarget ?? 0) >= 3 &&
       huntContinuationPolicies.length > 0 &&
       huntContinuationPolicies.every((policy) => policy.huntAbandonReason)
         ? huntContinuationPolicies[0].huntAbandonReason
@@ -2182,17 +2183,17 @@ export const analyzeSongSelection = (
         outcomeComponent(
           "expected-practice-stat-delta",
           0,
-          "zero-income-projection",
+          "generic-behavioral-projection",
         ),
         outcomeComponent(
           "expected-skill-points",
           0,
-          "zero-income-projection",
+          "generic-behavioral-projection",
         ),
         outcomeComponent(
           "friendship-exposure",
           0,
-          "zero-income-projection",
+          "generic-behavioral-projection",
         ),
         ...activeHuntComponents(
           waitAbandonsHunt ? "abandoned" : "preserved",
@@ -2276,6 +2277,8 @@ export const analyzeSongSelection = (
       huntDecision: waitHuntDecision,
       horizonOutcome: waitHorizonOutcome,
       utilityAssessment: utilityAssessmentFromOutcome(waitHorizonOutcome),
+      projectionAssessment:
+        genericProjectionAssessmentFromOutcome(waitHorizonOutcome),
       decisionVector: decisionVectorFromUtilityAssessment(
         utilityAssessmentFromOutcome(waitHorizonOutcome),
       ),
@@ -2305,7 +2308,10 @@ export const analyzeSongSelection = (
   const ranked = policies
     .filter((policy) => policy.valid)
     .sort((left, right) =>
-      compareUtilityAssessments(right.utilityAssessment, left.utilityAssessment),
+      compareLayeredDecisionAssessments(
+        layeredDecisionAssessmentFromOutcome(right.horizonOutcome),
+        layeredDecisionAssessmentFromOutcome(left.horizonOutcome),
+      ),
     );
   ranked.forEach((policy, index) => {
     policy.score = (ranked.length - index) * 100;

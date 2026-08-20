@@ -23,7 +23,12 @@ grand-live-zero-income-v1
     |
     v
 utilityAssessmentFromOutcome() (T1b)
-stat-point numeraire + named calibration parameters
+deterministic stat-point numeraire only
+    |
+    v
+T2 generic behavioural projection
+practice/SP training estimates as tie-breaks only
+Friendship exposure diagnostics only
     |
     v
 P4 robustness
@@ -43,17 +48,21 @@ mechanical or utility contract.
 
 T1a owns units and provenance, not utility. Relevant mechanical families are:
 
-| Metric | Unit | Provenance |
-| --- | --- | --- |
-| expected practice-stat delta | stat-point | zero-income projection |
-| expected Skill Points | skill-point | zero-income projection |
-| Friendship exposure | friendship-pt-training | zero-income projection |
-| Great Success crossed/reach | count / probability | deterministic or projected |
-| Gate 16/18 crossed/reach | count / probability | deterministic or projected |
-| funding gaps / retained tokens | token | observed/projected state |
+| Metric | Unit | Provenance | Decision layer |
+| --- | --- | --- | --- |
+| immediate stat delta | stat-point | deterministic consequence | T1b |
+| immediate Skill Points | skill-point | deterministic consequence | T1b |
+| expected practice-stat delta | stat-point | generic behavioural projection | T2 |
+| expected Skill Points from future trainings | skill-point | generic behavioural projection | T2 |
+| Friendship exposure | friendship-pt-training | generic behavioural projection | diagnostic only |
+| Great Success crossed/reach | count / probability | deterministic or zero-income projection | crossed → T1b; reach → mechanics |
+| Gate 16/18 crossed/reach | count / probability | deterministic or zero-income projection | crossed → T1b; reach → mechanics |
+| funding gaps / retained tokens | token | observed/projected state | mechanics |
 
 Tokens remain state only. They never receive a generic exchange rate into
-stat-point utility.
+stat-point utility. `generic-behavioral-projection` is deliberately distinct
+from `zero-income-projection`: the former also assumes a generic future click
+profile and therefore cannot outrank factual differences.
 
 Unknown and interval-valued mechanical outputs cannot silently scalarize to
 zero. A utility transform consumes only explicit numeric consequences.
@@ -66,13 +75,23 @@ The utility model identifier is:
 grand-live-stat-numeraire-v1
 ```
 
-The projection policy is:
+The projection policy remains:
 
 ```text
 grand-live-zero-income-v1
 ```
 
-### Mechanical / derived values
+Canonical T1b contains only deterministic consequences of the current action:
+
+```text
+immediateStatDelta
++ GREAT_SUCCESS_STAT_DELTA × greatSuccessSecured
++ GATE18_STAT_DELTA × gate18Crossed
++ immediate/lesson Skill Points × SKILL_POINT_UTILITY
++ named scenario residuals for gates actually crossed
+```
+
+Mechanical constants:
 
 ```text
 STAT_POINT_UTILITY       = 1
@@ -80,23 +99,7 @@ GREAT_SUCCESS_STAT_DELTA = 35
 GATE18_STAT_DELTA        = 50
 ```
 
-`expectedPracticeStatDelta` is already expressed in stat points and therefore
-uses coefficient 1 by construction.
-
-### Bounded calibration
-
-Friendship uses:
-
-```text
-FRIENDSHIP_EXPOSURE_STAT_RATE
-nominal = 0.52
-calibration interval = [0.30, 0.80]
-```
-
-The exposure itself remains `Friendship bonus point × generic remaining
-training`; the rainbow/stat conversion belongs entirely to the exchange rate.
-
-### Free parameters
+Free policy parameters remain:
 
 ```text
 SKILL_POINT_UTILITY    = 1.0 nominal seed
@@ -104,30 +107,64 @@ SCENARIO_SKILL_UTILITY = 0
 SCENARIO_EVENT_UTILITY = 0
 ```
 
-These are explicit policy parameters, not hidden truth claims. In particular,
-`SKILL_POINT_UTILITY = 1` is a neutral seed for calibration rather than a value
-derived from the former mixed-unit comparator.
+`FRIENDSHIP_EXPOSURE_STAT_RATE` is **not** part of canonical T1b anymore.
+Friendship priority comes from its documented structural tier, not from a fake
+conversion of generic exposure into stat points.
+
+## T2 generic behavioural projection
+
+T2 is not a second scalar utility. It is reached only after hard state, risk
+admission, structural tier, deterministic T1b reward and visible purchase cost
+are unable to separate two actions. Its operational tie-breaks are:
+
+```text
+expectedPracticeStatDelta
+-> expectedSkillPoints
+-> deterministic id fallback
+```
+
+This keeps the original use case: at equal structure and cost, a generic
+`Speed training +1` can beat `Guts training +1`. Friendship exposure remains in
+`HorizonOutcome` and logs for analysis but does not vote in the canonical song
+comparison.
 
 ## Discrete gates
 
 Great Success and the 16/18 gates are discrete rewards. Raw progress such as
-`15 / 18` is not converted into proportional utility.
-
-Gate 16 contributes only its named scenario-event residual when crossed or when
-a zero-income projection actually reaches its deadline. Gate 18 contributes the
-50-stat mechanical reward plus its named scenario-skill residual under the same
-condition.
-
-If the rollout horizon does not reach a gate deadline, the reward is recorded as
-`not-projected`; that is distinct from a projected probability of exactly zero.
+`15 / 18` is never converted proportionally. Canonical T1b rewards a gate only
+when the current action actually crosses it. A `zeroIncomeReach` probability is
+still valuable mechanics/diagnostics, but it is not silently converted into a
+fraction of the deterministic gate reward.
 
 ## HUNT
 
-HUNT no longer owns a second utility model. Token cost, miss count, filler count
-and cycle depth remain diagnostics/state, but are not converted into pseudo
-stat-points. Admission uses the projected find-and-fund probability together
-with the target's T1b utility. A deep hunt is not made bad merely because it is
-deep.
+HUNT no longer owns a marginal pseudo-utility model and no raw miss counter is
+an admission threshold. The persistent chase records missed physical pages,
+committed technique spend and filler purchases as telemetry only.
+
+The crucial distinction is:
+
+```text
+STOP current chain != ABANDON persistent HUNT
+```
+
+A song policy may therefore recommend `buy-stop` because the current wallet or
+rollout does not justify another immediate technique while leaving the SP target
+active for later trainings. `P(find & fund) = 0` under zero income is not proof
+of impossibility because future training income is unknown and non-negative.
+
+Persistent HUNT is abandoned automatically only when the target has no modeled
+appearance probability left (or the state was already closed). `pagesSeenWithoutTarget`,
+filler count, committed spend and cycle depth do not change that admission.
+
+## Terminal compatibility boundary
+
+P5/P4 terminal ranking is intentionally isolated in
+`terminal-compat-utility.ts`. It temporarily preserves the deployed v1.0.2/v6
+terminal scalar, including the historical Friendship conversion, so P3b2 cannot
+silently rewrite validated C4/Grand-Live decisions as a side effect. New song
+policy code must not import that compatibility module. Its removal is a separate
+replay-gated migration.
 
 ## Carried-page song selection
 

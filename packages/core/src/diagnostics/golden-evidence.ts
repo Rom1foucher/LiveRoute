@@ -36,6 +36,8 @@ export type GoldenCheckpoint = {
     choiceId?: string;
     matchedRecommendation?: boolean;
     recommendationNormal?: string;
+    terminalCandidateId?: string;
+    terminalAction?: "expose-and-carry" | "stop-now";
   };
   reason: string;
 };
@@ -230,6 +232,48 @@ export const assertGoldenManifest = (
         `golden manifest: checkpoint ${id} has invalid reviewStatus`,
       );
     }
+    if (raw.expect !== undefined) {
+      if (!isRecord(raw.expect)) {
+        throw new Error(
+          `golden manifest: checkpoint ${id} expect must be an object`,
+        );
+      }
+      for (const key of [
+        "choiceKind",
+        "choiceId",
+        "recommendationNormal",
+        "terminalCandidateId",
+      ] as const) {
+        if (raw.expect[key] !== undefined) {
+          requireString(raw.expect[key], `checkpoint ${id} expect.${key}`);
+        }
+      }
+      if (
+        raw.expect.matchedRecommendation !== undefined &&
+        typeof raw.expect.matchedRecommendation !== "boolean"
+      ) {
+        throw new Error(
+          `golden manifest: checkpoint ${id} expect.matchedRecommendation must be boolean`,
+        );
+      }
+      if (
+        raw.expect.terminalAction !== undefined &&
+        raw.expect.terminalAction !== "expose-and-carry" &&
+        raw.expect.terminalAction !== "stop-now"
+      ) {
+        throw new Error(
+          `golden manifest: checkpoint ${id} has invalid expect.terminalAction`,
+        );
+      }
+      if (
+        raw.expect.terminalAction !== undefined &&
+        raw.expect.terminalCandidateId === undefined
+      ) {
+        throw new Error(
+          `golden manifest: checkpoint ${id} terminalAction requires terminalCandidateId`,
+        );
+      }
+    }
     if (!isRecord(raw.selector)) {
       throw new Error(`golden manifest: checkpoint ${id} selector is required`);
     }
@@ -286,6 +330,16 @@ const readChoiceField = (entry: LogEntry, key: string): unknown =>
 const readRecommendationField = (entry: LogEntry, key: string): unknown =>
   isRecord(entry.recommendation) ? entry.recommendation[key] : undefined;
 
+const terminalDecisions = (entry: LogEntry): Record<string, unknown>[] => {
+  if (!isRecord(entry.recommendation)) return [];
+  const candidates = entry.recommendation.candidates;
+  if (!Array.isArray(candidates)) return [];
+  return candidates.flatMap((candidate) => {
+    if (!isRecord(candidate) || !isRecord(candidate.terminalDecision)) return [];
+    return [candidate.terminalDecision];
+  });
+};
+
 const assertCheckpointExpectation = (
   checkpoint: GoldenCheckpoint,
   entry: LogEntry,
@@ -332,6 +386,34 @@ const assertCheckpointExpectation = (
         readRecommendationField(entry, "normal"),
       )}`,
     );
+  }
+  if (
+    expected.terminalCandidateId !== undefined ||
+    expected.terminalAction !== undefined
+  ) {
+    const decisions = terminalDecisions(entry);
+    const decision = decisions.find(
+      (item) =>
+        expected.terminalCandidateId === undefined ||
+        item.candidateId === expected.terminalCandidateId,
+    );
+    if (!decision) {
+      throw new Error(
+        `${checkpoint.id}: expected terminal candidate ${String(
+          expected.terminalCandidateId,
+        )}, but no matching terminal decision was logged`,
+      );
+    }
+    if (
+      expected.terminalAction !== undefined &&
+      decision.action !== expected.terminalAction
+    ) {
+      throw new Error(
+        `${checkpoint.id}: expected terminal action ${expected.terminalAction}, got ${String(
+          decision.action,
+        )}`,
+      );
+    }
   }
 };
 

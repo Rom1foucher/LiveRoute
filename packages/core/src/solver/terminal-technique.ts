@@ -48,12 +48,12 @@ import {
   type PairedDifferenceStats,
 } from "../monte-carlo.ts";
 import {
-  compareUtilityAssessments,
-  utilityBreakpointsFromLinearTerms,
-  type UtilityAssessment,
-  type UtilityLinearTerms,
-  type UtilityParameterId,
-} from "./utility-model.ts";
+  compareTerminalCompatUtilityAssessments,
+  terminalCompatBreakpointsFromLinearTerms,
+  type TerminalCompatLinearTerms,
+  type TerminalCompatParameterId,
+  type TerminalCompatUtilityAssessment,
+} from "./terminal-compat-utility.ts";
 import {
   calibrationSensitive,
   coRecommendationReason,
@@ -128,23 +128,23 @@ type Aggregate = {
   weightedCommittedCost: number;
 };
 
-const UTILITY_PARAMETER_IDS: readonly UtilityParameterId[] = [
-  "SKILL_POINT_UTILITY",
+const UTILITY_PARAMETER_IDS: readonly TerminalCompatParameterId[] = [
   "FRIENDSHIP_EXPOSURE_STAT_RATE",
+  "SKILL_POINT_UTILITY",
   "SCENARIO_SKILL_UTILITY",
   "SCENARIO_EVENT_UTILITY",
 ];
 
 type UtilityLinearAggregate = {
   fixedStatPoints: number;
-  coefficients: Record<UtilityParameterId, number>;
+  coefficients: Record<TerminalCompatParameterId, number>;
 };
 
 const emptyUtilityLinearAggregate = (): UtilityLinearAggregate => ({
   fixedStatPoints: 0,
   coefficients: {
-    SKILL_POINT_UTILITY: 0,
     FRIENDSHIP_EXPOSURE_STAT_RATE: 0,
+    SKILL_POINT_UTILITY: 0,
     SCENARIO_SKILL_UTILITY: 0,
     SCENARIO_EVENT_UTILITY: 0,
   },
@@ -152,7 +152,7 @@ const emptyUtilityLinearAggregate = (): UtilityLinearAggregate => ({
 
 const addUtilityLinearTerms = (
   aggregate: UtilityLinearAggregate,
-  assessment: UtilityAssessment | null,
+  assessment: TerminalCompatUtilityAssessment | null,
 ): void => {
   if (!assessment) return;
   aggregate.fixedStatPoints += assessment.linearTerms.fixedStatPoints;
@@ -165,14 +165,14 @@ const addUtilityLinearTerms = (
 const normalizedUtilityLinearTerms = (
   aggregate: UtilityLinearAggregate,
   samples: number,
-): UtilityLinearTerms => ({
+): TerminalCompatLinearTerms => ({
   fixedStatPoints: aggregate.fixedStatPoints / Math.max(1, samples),
   coefficients: Object.fromEntries(
     UTILITY_PARAMETER_IDS.map((parameter) => [
       parameter,
       aggregate.coefficients[parameter] / Math.max(1, samples),
     ]),
-  ) as Record<UtilityParameterId, number>,
+  ) as Record<TerminalCompatParameterId, number>,
 });
 
 const emptyAggregate = (): Aggregate => ({
@@ -294,7 +294,7 @@ const assertNever = (value: never): never => {
 type TerminalPageActionTrialEvaluation = {
   action: ExposedPageAction;
   result: CrossSectionTrialResult;
-  utility: UtilityAssessment;
+  utility: TerminalCompatUtilityAssessment;
   committedCost: number;
   weightedCommittedCost: number;
 };
@@ -702,7 +702,7 @@ export const evaluateTerminalTechniqueOptions = (
             if (!evaluation) continue;
             if (
               !bestEvaluation ||
-              compareUtilityAssessments(
+              compareTerminalCompatUtilityAssessments(
                 evaluation.utility,
                 bestEvaluation.utility,
               ) > 0
@@ -789,7 +789,7 @@ export const evaluateTerminalTechniqueOptions = (
     const calibrationBreakpoints =
       riskClearlyBelow
         ? []
-        : utilityBreakpointsFromLinearTerms({
+        : terminalCompatBreakpointsFromLinearTerms({
             leftId: "expose-and-carry",
             rightId: "stop-now",
             left: pushLinearTerms,

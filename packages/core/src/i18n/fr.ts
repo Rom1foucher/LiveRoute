@@ -145,6 +145,15 @@ export const renderFr = (message: Message): string => {
       return `abandon HUNT après ${message.pages} page(s) ratée(s) : ${fixed1(message.probability)} % find & fund, valeur marginale ${message.netValue.toFixed(1)}`;
     case "reason.huntContinueMarginalValue":
       return `poursuite HUNT après ${message.pages} page(s) ratée(s) : ${fixed1(message.probability)} % find & fund, valeur marginale ${message.netValue >= 0 ? "+" : ""}${message.netValue.toFixed(1)}`;
+    case "reason.huntAbandonUnreachable":
+      return `abandon HUNT : apparition de la cible à ${fixed1(message.appearanceProbability)} % après ${message.pages} page(s) ratée(s)`;
+    case "reason.huntContinueReachability": {
+      const funding =
+        message.fundingAssessment === "future-income-required"
+          ? "le financement zero-income actuel est insuffisant ; le revenu des trainings futurs reste inconnu"
+          : `fundability zero-income ${message.zeroIncomeFundabilityProbability === null ? "inconnue" : `${fixed1(message.zeroIncomeFundabilityProbability)} %`}`;
+      return `HUNT reste actif après ${message.pages} page(s) ratée(s) : ${fixed1(message.appearanceProbability)} % d'apparition, ${fixed1(message.findAndFundProbability)} % find & fund zero-income ; ${funding}`;
+    }
     case "reason.securesGreatSuccess":
       return "sécurise Great Success";
     case "reason.nextSectionCheckpoint": {

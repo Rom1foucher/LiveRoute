@@ -179,6 +179,39 @@ test("P3b2 : sans valeur future modélisée, un filler immédiat bat le carry pu
   assert.ok((result.recommended?.utilityAssessment.nominalStatPoints ?? 0) > 0);
 });
 
+test("P3b2 : un bonus plat est un reward immédiat T1b, pas une projection de training", () => {
+  const flat = {
+    ...song("flat-speed", { dance: 21 }, ["filler"]),
+    practiceBonus: "Speed +26",
+  };
+  const result = analyzeSongSelection({
+    period: "junior",
+    tokens: rich,
+    visibleSongs: [flat],
+    remainingSongs: [flat],
+    techniquesToNextSong: 2,
+    songsThisSection: 0,
+    totalSongs: 0,
+    concertIndex: 0,
+    timingMode: "section-open",
+    trials: 80,
+  });
+  const buy = result.policies.find(
+    (policy) => policy.songId === flat.id && policy.action.startsWith("buy-"),
+  );
+  assert.ok(buy);
+  assert.equal(
+    horizonMetricNumber(buy.horizonOutcome, "immediate-stat-delta"),
+    26,
+  );
+  assert.equal(
+    horizonMetricNumber(buy.horizonOutcome, "immediate-skill-points"),
+    25,
+  );
+  assert.equal(buy.projectionAssessment.expectedPracticeStatDelta, 0);
+  assert.ok(buy.utilityAssessment.nominalStatPoints >= 51);
+});
+
 test("une Friendship utile est activée avant le live plutôt que portée", () => {
   const friendship = song("friendship", { dance: 21 }, ["friendship-10"]);
   const result = analyzeSongSelection({
@@ -446,15 +479,19 @@ test("CLOSE garde la Friendship visible devant un filler légèrement plus sûr"
     (policy) => policy.id === "blue:buy-continue",
   );
   const chosen = result.recommended;
-  assert.ok(filler && chosen);
+  if (!filler || !chosen) throw new Error("expected filler and recommended policy");
   assert.equal(filler.decisionVector.hard, chosen.decisionVector.hard);
   assert.equal(
     filler.decisionVector.riskAdmissible,
     chosen.decisionVector.riskAdmissible,
   );
+  assert.equal(
+    chosen.utilityAssessment.nominalStatPoints,
+    filler.utilityAssessment.nominalStatPoints,
+  );
   assert.ok(
-    chosen.utilityAssessment.nominalStatPoints >
-      filler.utilityAssessment.nominalStatPoints,
+    horizonMetricNumber(chosen.horizonOutcome!, "structural-tier")! >
+      horizonMetricNumber(filler.horizonOutcome!, "structural-tier")!,
   );
 });
 
@@ -761,6 +798,7 @@ const catalogTarget = (id: string): SongTarget => {
     id: source.id,
     name: source.name,
     cost: source.cost,
+    practiceBonus: source.practiceBonus,
     ...contextualSongValues({
       practiceBonus: source.practiceBonus,
       liveBonusType: source.liveBonusType,
@@ -1033,7 +1071,7 @@ test("replay C4 : Fanfare +10 est recommandée sans faux blocage 16", () => {
   assert.equal(fanfare?.blocking, null);
 });
 
-test("P3b2 replay C3 cycle 4 : la profondeur passée ne pénalise plus Komorebi", () => {
+test("P3b2 replay C3 cycle 4 : le coût puis T2 choisissent Tachiichi sans valoriser la profondeur passée", () => {
   const remainingIds = [
     "tachiichi",
     "nigekiri",
@@ -1081,18 +1119,35 @@ test("P3b2 replay C3 cycle 4 : la profondeur passée ne pénalise plus Komorebi"
   });
 
   assert.equal(result.plan.id, "hunt-sp3");
-  assert.equal(result.recommended?.id, "komorebi:buy-stop");
-  assert.equal(result.recommended?.abandonsHunt, true);
-  assert.equal(
-    result.recommended?.huntAbandonReason?.code,
-    "reason.huntAbandonMarginalValue",
+  assert.equal(result.recommended?.id, "tachiichi:buy-continue");
+  const tachiichi = result.policies.find(
+    (policy) => policy.id === "tachiichi:buy-continue",
   );
-  assert.equal(result.recommended?.huntDecision?.action, "abandon-to-hold");
-  assert.equal(
-    result.policies.find((policy) => policy.id === "komorebi:buy-continue")
-      ?.valid,
-    false,
+  const nigekiri = result.policies.find(
+    (policy) => policy.id === "nigekiri:buy-continue",
   );
+  const komorebi = result.policies.find(
+    (policy) => policy.id === "komorebi:buy-continue",
+  );
+  if (!tachiichi || !nigekiri || !komorebi) {
+    throw new Error("expected all three C3 replay policies");
+  }
+  assert.equal(
+    horizonMetricNumber(tachiichi.horizonOutcome!, "visible-song-cost")!,
+    horizonMetricNumber(nigekiri.horizonOutcome!, "visible-song-cost"),
+  );
+  assert.ok(
+    horizonMetricNumber(komorebi.horizonOutcome!, "visible-song-cost")! >
+      horizonMetricNumber(tachiichi.horizonOutcome!, "visible-song-cost")!,
+  );
+  assert.ok(
+    tachiichi.projectionAssessment.expectedPracticeStatDelta >
+      nigekiri.projectionAssessment.expectedPracticeStatDelta,
+  );
+  assert.equal(result.recommended?.abandonsHunt, false);
+  assert.equal(result.recommended?.huntAbandonReason, undefined);
+  assert.equal(result.recommended?.huntDecision?.action, "continue-hunt");
+  assert.equal(komorebi.valid, true);
 });
 
 test("PR-6 : après trois misses, une cible SP rentable et un cycle court peuvent encore poursuivre HUNT", () => {
@@ -1153,17 +1208,21 @@ test("P3b2 : un cycle à cinq techniques n est plus pénalisé par sa profondeur
     trials: 300,
   });
   assert.equal(result.plan.mode, "hunt");
-  assert.equal(result.recommended?.action, "buy-stop");
+  // With a fully reachable/fundable SP3 target, there is no factual reason to
+  // stop this five-technique chain merely because it is deep.
+  assert.equal(result.recommended?.action, "buy-continue");
   assert.ok((result.recommended?.utilityAssessment.nominalStatPoints ?? 0) > 0);
   const continuation = result.policies.find(
     (policy) => policy.id === "filler-abandon:buy-continue",
   );
   assert.ok(continuation);
   assert.equal(continuation.huntDecision?.action, "continue-hunt");
-  assert.ok((continuation.huntDecision?.expectedTargetValue ?? 0) > 0);
+  assert.ok(
+    (continuation.huntDecision?.targetAppearanceProbability ?? 0) > 0,
+  );
 });
 
-test("P3b2 : une faible probabilité reste valorisée par son utilité attendue sans pénalité de profondeur", () => {
+test("P3b2 : une faible fundability zero-income peut stopper la chaîne sans abandonner HUNT", () => {
   const filler = song("filler-low-probability", { dance: 21 }, ["filler"]);
   const sp3 = song(
     "SP3-low-probability",
@@ -1196,12 +1255,18 @@ test("P3b2 : une faible probabilité reste valorisée par son utilité attendue 
   });
 
   assert.equal(result.recommended?.action, "buy-stop");
-  assert.equal(result.recommended?.abandonsHunt, true);
-  assert.equal(
-    result.recommended?.huntAbandonReason?.code,
-    "reason.huntAbandonMarginalValue",
+  assert.equal(result.recommended?.abandonsHunt, false);
+  assert.equal(result.recommended?.huntAbandonReason, undefined);
+  const continuation = result.policies.find(
+    (policy) => policy.id === "filler-low-probability:buy-continue",
   );
-  assert.equal(result.recommended?.huntDecision?.action, "abandon-to-hold");
+  assert.equal(continuation?.huntDecision?.action, "continue-hunt");
+  assert.ok(
+    continuation?.huntDecision?.fundingAssessment ===
+      "future-income-required" ||
+      continuation?.huntDecision?.fundingAssessment ===
+        "zero-income-fundable",
+  );
 });
 
 test("Grand Live : Great Success incomplet force encore la conversion, indépendamment de 18", () => {

@@ -70,14 +70,14 @@ test("P6 song log materializes one canonical T1a/T1b/robustness view", () => {
 
   const diagnostics = canonicalSongDecisionDiagnostics(result, recommended);
   assert.equal(diagnostics.schema, DECISION_DIAGNOSTIC_SCHEMA);
-  assert.equal(diagnostics.modelCoverage, "full-t1a-t1b");
+  assert.equal(diagnostics.modelCoverage, "full-t1a-t1b-t2");
   assert.equal(diagnostics.versions.projectionPolicy, "grand-live-zero-income-v1");
   assert.equal(diagnostics.versions.utilityModel, "grand-live-stat-numeraire-v1");
   assert.equal(diagnostics.versions.robustnessPolicy, "grand-live-robustness-v1");
   assert.equal(diagnostics.robustness.coRecommendationReason, "calibration-sensitive");
   assert.equal(diagnostics.robustness.paired, null);
   assert.ok(diagnostics.robustness.breakpoints.length > 0);
-  assert.equal(diagnostics.separation.firstSeparatingLayer, "utility");
+  assert.equal(diagnostics.separation.firstSeparatingLayer, "structural-tier");
 
   assert.equal(diagnostics.t1a.status, "available");
   if (diagnostics.t1a.status === "available") {
@@ -90,17 +90,26 @@ test("P6 song log materializes one canonical T1a/T1b/robustness view", () => {
 
   assert.equal(diagnostics.t1b.status, "available");
   if (diagnostics.t1b.status === "available") {
-    const friendshipRate = diagnostics.t1b.value.calibration.find(
-      (parameter) => parameter.id === "FRIENDSHIP_EXPOSURE_STAT_RATE",
+    assert.equal(
+      diagnostics.t1b.value.calibration.some(
+        (parameter) => String(parameter.id) === "FRIENDSHIP_EXPOSURE_STAT_RATE",
+      ),
+      false,
     );
-    assert.deepEqual(friendshipRate?.calibrationInterval, {
-      lower: 0.3,
-      upper: 0.8,
+    assert.deepEqual(diagnostics.t1b.value.boundedCalibrationInterval, {
+      lower: diagnostics.t1b.value.nominalStatPoints,
+      upper: diagnostics.t1b.value.nominalStatPoints,
     });
     assert.equal(
       diagnostics.t1b.value.breakpoints.length,
       diagnostics.robustness.breakpoints.length,
     );
+  }
+
+  assert.equal(diagnostics.t2.status, "available");
+  if (diagnostics.t2.status === "available") {
+    assert.equal(diagnostics.t2.value.friendshipExposureAffectsRanking, false);
+    assert.ok(diagnostics.t2.value.expectedSkillPoints > 0);
   }
 });
 

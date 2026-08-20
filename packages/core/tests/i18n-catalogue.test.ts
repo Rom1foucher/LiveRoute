@@ -54,6 +54,19 @@ const SAMPLES: Record<MessageCode, Message> = {
     netValue: 8.2,
     pages: 3,
   },
+  "reason.huntAbandonUnreachable": {
+    code: "reason.huntAbandonUnreachable",
+    appearanceProbability: 0,
+    pages: 4,
+  },
+  "reason.huntContinueReachability": {
+    code: "reason.huntContinueReachability",
+    appearanceProbability: 0.4,
+    findAndFundProbability: 0,
+    zeroIncomeFundabilityProbability: 0,
+    fundingAssessment: "future-income-required",
+    pages: 4,
+  },
   "reason.securesGreatSuccess": { code: "reason.securesGreatSuccess" },
   "policy.noPurchase": { code: "policy.noPurchase" },
   "reason.finalGateSecuredCounter": {
