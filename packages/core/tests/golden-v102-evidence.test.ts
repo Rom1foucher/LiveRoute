@@ -1,0 +1,170 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import {
+  assertGoldenManifest,
+  extractGoldenEvidence,
+  parseNdjson,
+  type GoldenManifest,
+} from "../src/diagnostics/golden-evidence.ts";
+
+const loadManifest = async (): Promise<GoldenManifest> => {
+  const raw = JSON.parse(
+    await readFile(
+      new URL("../fixtures/golden-v1.0.2-checkpoints.json", import.meta.url),
+      "utf8",
+    ),
+  ) as unknown;
+  assertGoldenManifest(raw);
+  return raw;
+};
+
+test("v1.0.2 golden manifest is structurally valid and uses accepted explicit checkpoints", async () => {
+  const manifest = await loadManifest();
+  assert.equal(manifest.baseline.policyVersion, "grand-live-v6");
+  assert.equal(manifest.baseline.releaseTag, "v1.0.2");
+  assert.ok(manifest.checkpoints.length >= 15);
+  assert.ok(
+    manifest.checkpoints.every((entry) => entry.reviewStatus === "accepted"),
+  );
+  assert.ok(
+    manifest.checkpoints.some((entry) => entry.category === "carryover"),
+  );
+  assert.ok(
+    manifest.checkpoints.some((entry) => entry.category === "hunt-target"),
+  );
+  assert.ok(manifest.checkpoints.some((entry) => entry.category === "c4-push"));
+  assert.ok(
+    manifest.checkpoints.some((entry) => entry.category === "grand-live-conversion"),
+  );
+});
+
+test("golden extractor matches session + event + sequence + stateHash and validates the historical choice", async () => {
+  const manifest: GoldenManifest = {
+    manifestVersion: 1,
+    id: "test",
+    baseline: {
+      releaseTag: "v1.0.2",
+      commit: "69cb994",
+      policyVersion: "grand-live-v6",
+      ruleSetId: "rules",
+    },
+    sources: [{ id: "source", fileName: "decision.ndjson" }],
+    runs: [
+      {
+        id: "run",
+        sourceId: "source",
+        sessionId: "session",
+        reviewStatus: "accepted",
+      },
+    ],
+    checkpoints: [
+      {
+        id: "checkpoint",
+        runId: "run",
+        category: "hunt-target",
+        reviewStatus: "accepted",
+        selector: { event: "choice", sequence: 94, stateHash: "C3-AAAA" },
+        expect: {
+          choiceKind: "song",
+          choiceId: "grow-up-shine",
+          matchedRecommendation: true,
+        },
+        reason: "test",
+      },
+    ],
+  };
+  const entries = parseNdjson(
+    `${JSON.stringify({
+      schemaVersion: 4,
+      policyVersion: "grand-live-v6",
+      ruleSetId: "rules",
+      sessionId: "session",
+      sequence: 94,
+      stateHash: "C3-AAAA",
+      event: "choice",
+      timestamp: "2026-08-15T11:18:41.028Z",
+      state: { concertIndex: 2 },
+      choice: {
+        kind: "song",
+        id: "grow-up-shine",
+        matchedRecommendation: true,
+      },
+    })}\n`,
+    "decision.ndjson",
+  );
+  const snapshot = extractGoldenEvidence(
+    manifest,
+    new Map([["source", entries]]),
+  );
+  assert.equal(snapshot.checkpoints.length, 1);
+  assert.deepEqual(snapshot.checkpoints[0]?.evidence.choice, {
+    kind: "song",
+    id: "grow-up-shine",
+    matchedRecommendation: true,
+  });
+});
+
+test("golden extractor rejects a historical action that no longer matches the classified evidence", () => {
+  const manifest: GoldenManifest = {
+    manifestVersion: 1,
+    id: "test",
+    baseline: {
+      releaseTag: "v1.0.2",
+      commit: "69cb994",
+      policyVersion: "grand-live-v6",
+      ruleSetId: "rules",
+    },
+    sources: [{ id: "source", fileName: "decision.ndjson" }],
+    runs: [
+      {
+        id: "run",
+        sourceId: "source",
+        sessionId: "session",
+        reviewStatus: "accepted",
+      },
+    ],
+    checkpoints: [
+      {
+        id: "checkpoint",
+        runId: "run",
+        category: "song-choice",
+        reviewStatus: "accepted",
+        selector: { event: "choice", sequence: 1, stateHash: "C1-AAAA" },
+        expect: {
+          choiceKind: "song",
+          choiceId: "kiseki",
+          matchedRecommendation: true,
+        },
+        reason: "test",
+      },
+    ],
+  };
+  assert.throws(
+    () =>
+      extractGoldenEvidence(
+        manifest,
+        new Map([
+          [
+            "source",
+            [
+              {
+                policyVersion: "grand-live-v6",
+                ruleSetId: "rules",
+                sessionId: "session",
+                sequence: 1,
+                stateHash: "C1-AAAA",
+                event: "choice",
+                choice: {
+                  kind: "song",
+                  id: "nigekiri",
+                  matchedRecommendation: true,
+                },
+              },
+            ],
+          ],
+        ]),
+      ),
+    /expected choice id kiseki/,
+  );
+});

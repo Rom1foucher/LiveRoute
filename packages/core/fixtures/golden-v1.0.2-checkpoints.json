@@ -1,0 +1,244 @@
+{
+  "manifestVersion": 1,
+  "id": "live-route-v1.0.2-golden-behaviour",
+  "baseline": {
+    "releaseTag": "v1.0.2",
+    "commit": "69cb994ad8ba5a5415bc9ef188ad0f9e6104023e",
+    "policyVersion": "grand-live-v6",
+    "ruleSetId": "global-grand-live-2026-08-r3",
+    "note": "Behavioural golden standard only. Historical internal utility/exposure numbers are evidence, not targets."
+  },
+  "sources": [
+    {
+      "id": "run-20260815-morning",
+      "fileName": "decision(20260815-113855)(1).ndjson",
+      "note": "Cumulative export. Only the e75f... grand-live-v6 session is admitted here; the older 70b... grand-live-v5 session is explicitly excluded."
+    },
+    {
+      "id": "run-20260815-afternoon",
+      "fileName": "decision(20260815-160333)(1).ndjson",
+      "note": "Cumulative export containing the ec223... session. That session contains more than one logical run, so checkpoints are selected explicitly by sequence/stateHash rather than treating sessionId as one run."
+    }
+  ],
+  "excludedSessions": [
+    {
+      "sessionId": "70b985fd-ebe5-4714-b590-8ae88f1ac905",
+      "reason": "grand-live-v5 session from 2026-08-14; not representative of the v1.0.2/grand-live-v6 golden baseline."
+    }
+  ],
+  "runs": [
+    {
+      "id": "GOLDEN_E75_20260815",
+      "sourceId": "run-20260815-morning",
+      "sessionId": "e75f054d-ff78-4f9c-b4ae-f2f85f4babd6",
+      "reviewStatus": "accepted",
+      "note": "Run reviewed as globally solid: clean C1/C2/C3 policy, successful SP hunt, aggressive-but-bounded C4, then sensible Grand Live conversion. Individual unmatched manual overrides are not promoted as golden checkpoints."
+    },
+    {
+      "id": "GOLDEN_EC223_A_20260815",
+      "sourceId": "run-20260815-afternoon",
+      "sessionId": "ec223cf4-286d-4ea7-8df9-2c2115e1cc7a",
+      "sequenceRange": [1, 219],
+      "reviewStatus": "accepted",
+      "note": "First logical run inside the long-lived ec223... logging session. Reviewed as one of the strong v6 runs; explicit sequence bounds prevent accidental mixing with the later reset."
+    },
+    {
+      "id": "GOLDEN_EC223_B_20260815",
+      "sourceId": "run-20260815-afternoon",
+      "sessionId": "ec223cf4-286d-4ea7-8df9-2c2115e1cc7a",
+      "sequenceRange": [220, 9999],
+      "reviewStatus": "accepted",
+      "note": "Second logical run inside ec223..., beginning after the C1 reset around sequence 220. Reviewed as a strong v6 run including real carryover, deep C4 progression and Grand Live conversion."
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "G102_E75_C1_CHEAP_TECH",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 24, "stateHash": "C1-A4BA82C1" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-3", "matchedRecommendation": true },
+      "reason": "Representative C1 low-cost technique choice followed by the user; protects ordinary resource ranking without asserting any internal utility number."
+    },
+    {
+      "id": "G102_E75_C1_RESOURCE_TIEBREAK",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 33, "stateHash": "C1-3CAE6201" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
+      "reason": "Accepted C1 technique ranking on the validated run. Useful guard against regressions in ordinary colour/resource tie-breaking."
+    },
+    {
+      "id": "G102_E75_C2_CLOSE_TECH",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 70, "stateHash": "C2-D1EF1795" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-2", "matchedRecommendation": true },
+      "reason": "Accepted C2 close-path technique choice before the section song decision."
+    },
+    {
+      "id": "G102_E75_C2_KISEKI",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "song-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 73, "stateHash": "C2-5782902B" },
+      "expect": { "choiceKind": "song", "choiceId": "kiseki", "matchedRecommendation": true },
+      "reason": "Accepted C2 visible-song choice on the validated run; preserves structural song ranking rather than numeric exposure values."
+    },
+    {
+      "id": "G102_E75_C3_HUNT_FILLER",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "hunt",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 85, "stateHash": "C3-6EB62814" },
+      "expect": { "choiceKind": "song", "choiceId": "nigekiri", "matchedRecommendation": true },
+      "reason": "C3 SP3 hunt remains active after a miss; the chosen visible filler matched the recommendation. This is evidence for the useful shape of HUNT, not an oracle for the old three-miss threshold."
+    },
+    {
+      "id": "G102_E75_C3_HUNT_TECH",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "hunt",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 91, "stateHash": "C3-96E13AF2" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-2", "matchedRecommendation": true },
+      "reason": "Accepted continuation of the C3 SP3 hunt after a filler purchase. P3b2 may change the explanation, but should not casually destroy this successful ordinary hunt path."
+    },
+    {
+      "id": "G102_E75_C3_SP3_FOUND",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "hunt-target",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 94, "stateHash": "C3-3A0986C3" },
+      "expect": { "choiceKind": "song", "choiceId": "grow-up-shine", "matchedRecommendation": true },
+      "reason": "The SP3 hunt succeeds and Grow Up and Shine is bought as recommended. Structural target acquisition must remain dominant without requiring a fake stat-equivalent Friendship/SP exposure."
+    },
+    {
+      "id": "G102_E75_C3_POST_TARGET_TECH_1",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 97, "stateHash": "C3-C4222A43" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-3", "matchedRecommendation": true },
+      "reason": "Accepted post-target close-path technique choice; useful to detect broad ranking regressions after HUNT exits."
+    },
+    {
+      "id": "G102_E75_C3_POST_TARGET_TECH_2",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 100, "stateHash": "C3-3E3EFB86" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
+      "reason": "Second accepted close-path technique after the SP3 target."
+    },
+    {
+      "id": "G102_E75_C4_PUSH_CHECKPOINT",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-push",
+      "reviewStatus": "accepted",
+      "selector": { "event": "recommendation", "sequence": 139, "stateHash": "C4-9B9E614C" },
+      "reason": "Validated C4 run contains a positive expose-and-carry terminal branch here. Preserve the existence of an aggressive C4 path; do not preserve the historical exposure/net-value arithmetic itself."
+    },
+    {
+      "id": "G102_E75_C4_FIFTH_SONG",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "c4-song-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 171, "stateHash": "C4-F56FB9F5" },
+      "expect": { "choiceKind": "song", "choiceId": "yumezora", "matchedRecommendation": true },
+      "reason": "Accepted fifth-song C4 purchase after paying through the deep cycle. Guards against becoming uniformly over-conservative in C4."
+    },
+    {
+      "id": "G102_E75_GL_CONVERT_GO_THIS_WAY",
+      "runId": "GOLDEN_E75_20260815",
+      "category": "grand-live-conversion",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 181, "stateHash": "C5-DEC3F868" },
+      "expect": { "choiceKind": "song", "choiceId": "go-this-way", "matchedRecommendation": true },
+      "reason": "Accepted Grand Live conversion purchase; terminal stock is for conversion, not generic reserve utility."
+    },
+    {
+      "id": "G102_EC223A_C1_REAL_CARRY",
+      "runId": "GOLDEN_EC223_A_20260815",
+      "category": "carryover",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 27, "stateHash": "C1-801EB467" },
+      "expect": { "choiceKind": "concert", "choiceId": "concert-1", "matchedRecommendation": true },
+      "reason": "Real C1 song-page carry into C2, matched by the user. This is a high-value golden checkpoint for preserving carryover semantics."
+    },
+    {
+      "id": "G102_EC223A_C4_OPEN_TECH",
+      "runId": "GOLDEN_EC223_A_20260815",
+      "category": "c4-push",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 91, "stateHash": "C4-ABF25288" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
+      "reason": "Accepted early-C4 technique choice from a run later reviewed as strong."
+    },
+    {
+      "id": "G102_EC223A_C4_FANFARE",
+      "runId": "GOLDEN_EC223_A_20260815",
+      "category": "c4-song-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 129, "stateHash": "C4-2DF8D22C" },
+      "expect": { "choiceKind": "song", "choiceId": "fanfare", "matchedRecommendation": true },
+      "reason": "Accepted Fanfare purchase during a deep, successful C4 path. Protects structural Friendship prioritisation."
+    },
+    {
+      "id": "G102_EC223B_C1_CHEAP_TECH",
+      "runId": "GOLDEN_EC223_B_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 258, "stateHash": "C1-9A8EE163" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
+      "reason": "C1 reset confirms this is a second logical run inside the same logging session; accepted ordinary technique ranking."
+    },
+    {
+      "id": "G102_EC223B_C3_CLOSE_TECH",
+      "runId": "GOLDEN_EC223_B_20260815",
+      "category": "technique-choice",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 308, "stateHash": "C3-F2B8CE21" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-2", "matchedRecommendation": true },
+      "reason": "Accepted C3 technique choice in the second ec223 logical run."
+    },
+    {
+      "id": "G102_EC223B_C4_DEEP_TECH",
+      "runId": "GOLDEN_EC223_B_20260815",
+      "category": "c4-push",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 351, "stateHash": "C4-65724289" },
+      "expect": { "choiceKind": "technique", "choiceId": "option-1", "matchedRecommendation": true },
+      "reason": "Accepted deep-C4 technique step. The reviewed run reached seven C4 songs, so P3b2 must not regress into a blanket STOP policy."
+    },
+    {
+      "id": "G102_EC223B_GL_PYOITTO",
+      "runId": "GOLDEN_EC223_B_20260815",
+      "category": "grand-live-conversion",
+      "reviewStatus": "accepted",
+      "selector": { "event": "choice", "sequence": 423, "stateHash": "C5-CCC67D17" },
+      "expect": { "choiceKind": "song", "choiceId": "pyoitto", "matchedRecommendation": true },
+      "reason": "Accepted Grand Live conversion purchase near the end of the second validated run."
+    }
+  ],
+  "knownNonGoldenPatterns": [
+    {
+      "kind": "unmatched-manual-action",
+      "reason": "A user click with matchedRecommendation=false is historical evidence, not a golden solver decision, even when it occurs inside an accepted run."
+    },
+    {
+      "kind": "old-hunt-threshold",
+      "reason": "The raw three-miss HUNT threshold and its exposure-based continuation rule are explicitly under P3b2 redesign and must not be frozen as golden behaviour."
+    },
+    {
+      "kind": "friendship-stat-equivalent",
+      "reason": "Historical friendshipExposure / training-exposure / net-value numbers are diagnostics only; P3b2 is expected to change or remove their decision weight."
+    },
+    {
+      "kind": "known-c4-opportunity-cost-edge",
+      "reason": "Later C4 STOP cases identified as suspicious/buggy (for example the 41/51/51/45/72 state) are regression targets to fix, not accepted v1.0.2 oracle states."
+    }
+  ]
+}

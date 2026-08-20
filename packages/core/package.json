@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "replay:fixture": "node --experimental-strip-types scripts/replay-fixture.ts",
     "replay:corpus": "node --experimental-strip-types scripts/replay-corpus.ts",
-    "replay:diff": "node --experimental-strip-types scripts/replay-diff.ts"
+    "replay:diff": "node --experimental-strip-types scripts/replay-diff.ts",
+    "golden:v102": "node --experimental-strip-types scripts/golden-v102-evidence.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.0"

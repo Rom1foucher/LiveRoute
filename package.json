@@ -23,7 +23,8 @@
     "test:ui": "npm run test --workspace @glcp/ui",
     "test:desktop": "npm run test --workspace @glcp/desktop",
     "replay:corpus": "npm run replay:corpus --workspace @glcp/core --",
-    "replay:diff": "npm run replay:diff --workspace @glcp/core --"
+    "replay:diff": "npm run replay:diff --workspace @glcp/core --",
+    "golden:v102": "npm run golden:v102 --workspace @glcp/core --"
   },
   "devDependencies": {
     "prettier": "^3.6.2",
