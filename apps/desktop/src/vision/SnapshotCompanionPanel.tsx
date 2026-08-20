@@ -106,6 +106,8 @@ type SnapshotDecisionTools = {
   onClearDecisionLog: () => void;
   onUndo: () => void;
   onAdvanceConcert: () => boolean;
+  /** Clears the run state only. Calibration and learned OCR models survive. */
+  onResetRun: () => void;
 };
 
 type SnapshotCompanionPanelProps = {
@@ -1630,6 +1632,22 @@ export default function SnapshotCompanionPanel({
         : text("Concert enregistré.", "Concert recorded."),
     );
   };
+  const resetRunFromSnapshot = () => {
+    const confirmed = window.confirm(
+      text(
+        "Repartir sur une nouvelle run ? L’état de la run en cours sera effacé. Le calibrage et l’apprentissage OCR sont conservés.",
+        "Start a new run? The current run state will be cleared. Calibration and learned OCR models are preserved.",
+      ),
+    );
+    if (!confirmed) return;
+    decisionTools.onResetRun();
+    clearAfterPurchase(
+      text(
+        "Nouvelle run prête. Prends un snapshot de la première page.",
+        "New run ready. Take a snapshot of the first page.",
+      ),
+    );
+  };
   const undoFromSnapshot = () => {
     if (!decisionTools.canUndo) return;
     decisionTools.onUndo();
@@ -1939,6 +1957,17 @@ export default function SnapshotCompanionPanel({
               disabled={!decisionTools.canUndo}
             >
               ↶ {text("Annuler", "Undo")}
+            </button>
+            <button
+              type="button"
+              className="snapshot-reset-run"
+              onClick={resetRunFromSnapshot}
+              title={text(
+                "Le calibrage et l’apprentissage OCR sont conservés.",
+                "Calibration and learned OCR models are preserved.",
+              )}
+            >
+              {text("Nouvelle run", "New run")}
             </button>
             <button
               type="button"

@@ -14,6 +14,8 @@ type SongsPanelProps = {
   ownedSongs: Set<string>;
   ownedUnlockedSongs: Song[];
   pendingBonusCount: number;
+  postGrandLive: boolean;
+  techniqueOfferSlots: number;
   phaseUnlock: UnlockPhase;
   rollNote: string;
   setSongFilter: (value: SongFilter) => void;
@@ -36,7 +38,9 @@ export function SongsPanel({
   ownedUnlockedSongs,
   pendingBonusCount,
   phaseUnlock,
+  postGrandLive,
   rollNote,
+  techniqueOfferSlots,
   setSongFilter,
   skipEmptySongSelection,
   songFilter,
@@ -126,6 +130,14 @@ export function SongsPanel({
         </div>
         <p className="pool-roll-note">{rollNote}</p>
       </div>
+
+      {postGrandLive ? (
+        <p className="pool-roll-note">{L.songs.postGrandLiveNote}</p>
+      ) : techniqueOfferSlots > 0 ? (
+        <p className="pool-roll-note">
+          {L.songs.mixedOfferNote(3 - techniqueOfferSlots, techniqueOfferSlots)}
+        </p>
+      ) : null}
 
       {songSelectionOpen ? (
         <div className="selection-callout">

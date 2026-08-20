@@ -463,6 +463,10 @@ export const UI_FR = {
     carryover: "Carryover",
     dynamicPool: (short: string) => `Pool dynamique · ${short}`,
     remainingCount: (n: number) => `${n} restantes`,
+    mixedOfferNote: (songs: number, techniques: number) =>
+      `Pool courte : ${songs} song${songs > 1 ? "s" : ""} et ${techniques} technique${techniques > 1 ? "s" : ""} sur les trois cartes.`,
+    postGrandLiveNote:
+      "Après le Grand Live : plus aucune song proposée, uniquement des techniques.",
     filterInPool: "Dans la pool",
     filterOwned: "Achetées",
     filterLocked: "Verrouillées",
@@ -553,6 +557,9 @@ export const UI_FR = {
     modeDeSuivi: "Mode de suivi",
     reset: "Nouvelle run",
     undo: "↶ Annuler",
+    postGrandLive: "Grand Live joué",
+    postGrandLiveHint: "Passer en phase finale : techniques uniquement",
+    postGrandLiveActive: "Phase post-Grand Live",
   },
 };
 

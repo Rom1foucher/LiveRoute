@@ -692,6 +692,7 @@ export function SnapshotSlot({
         },
         onUndo: actions.undoLastAction,
         onAdvanceConcert: actions.advanceConcert,
+        onResetRun: actions.resetRun,
       }}
       onApply={applySnapshot}
       onPipelineTimings={actions.setPipelineTimings}

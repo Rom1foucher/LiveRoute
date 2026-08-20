@@ -65,6 +65,10 @@ export type RunView = {
   selectionSongs: Song[];
   songTargets: SongTarget[];
   expectedOfferCount: number;
+  /** Slots of the three-card offer filled by techniques when the pool is short. */
+  techniqueOfferSlots: number;
+  /** True once the Grand Live is played: techniques only, bounded horizon. */
+  postGrandLive: boolean;
   songOfferComplete: boolean;
   songSelectionOpen: boolean;
   nextSongCover: string;
@@ -172,6 +176,10 @@ export type ActionsView = {
   /** Replaces the manually entered state with externally captured state. */
   applyExternalState: (intake: ExternalStateIntake) => void;
   undoLastAction: () => void;
+  /** Clears the run state only; OCR calibration and learning are preserved. */
+  resetRun: () => void;
+  /** Explicit entry into the post-Grand-Live phase. */
+  enterPostGrandLive: () => void;
   setPipelineTimings: (timings: PipelineTimings | null) => void;
   runCurrentAnalysis: () => void;
   toggleVisibleSong: (id: string) => void;

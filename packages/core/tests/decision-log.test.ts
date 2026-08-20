@@ -157,6 +157,76 @@ test("le journal navigateur écrit un événement v5 lié, versionné et hashé"
   );
 });
 
+test("le journal navigateur reste borné en octets et garde les plus récents", async () => {
+  const localStorage = new StorageMock();
+  const sessionStorage = new StorageMock();
+  Object.assign(globalThis, { window: { localStorage, sessionStorage } });
+  configureDecisionLog({
+    appVersion: "0.25.0-test",
+    sink: browserDecisionSink(),
+    session: browserDecisionSession(),
+  });
+
+  // Real entries carry their canonical diagnostics; padding stands in for that
+  // bulk so the byte budget, not the entry count, is what binds here.
+  const padding = "x".repeat(20_000);
+  let last: string | undefined;
+  for (let index = 0; index < 120; index += 1) {
+    last = `choice-${index}`;
+    await appendDecisionLog({
+      id: last,
+      timestamp: "2026-08-03T21:00:00.000Z",
+      event: "choice",
+      source: "manual",
+      state: state([padding]),
+      choice: { kind: "song", id: "a", label: "Song A", recommended: true },
+    });
+  }
+
+  const raw = localStorage.getItem("grand-live-decision-log-v2") ?? "[]";
+  const stored = JSON.parse(raw) as Array<Record<string, unknown>>;
+  assert.ok(
+    raw.length <= 1_000_000,
+    `journal de ${raw.length} octets au-dessus du budget`,
+  );
+  assert.ok(stored.length > 0);
+  assert.ok(stored.length < 120, "aucune entrée ancienne n'a été rognée");
+  assert.equal(stored.at(-1)?.id, last);
+});
+
+test("un quota saturé n'interrompt jamais la run", async () => {
+  // Reproduces GitHub issue #2: the origin budget is already full, so setItem
+  // throws. The append must absorb it and the run must continue.
+  class FullStorage extends StorageMock {
+    override setItem(): void {
+      throw new DOMException(
+        "The quota has been exceeded.",
+        "QuotaExceededError",
+      );
+    }
+  }
+  const localStorage = new FullStorage();
+  Object.assign(globalThis, {
+    window: { localStorage, sessionStorage: new StorageMock() },
+  });
+  configureDecisionLog({
+    appVersion: "0.25.0-test",
+    sink: browserDecisionSink(),
+    session: browserDecisionSession(),
+  });
+
+  await assert.doesNotReject(() =>
+    appendDecisionLog({
+      id: "choice-quota",
+      timestamp: "2026-08-03T21:00:00.000Z",
+      event: "choice",
+      source: "manual",
+      state: state(["a"]),
+      choice: { kind: "song", id: "a", label: "Song A", recommended: true },
+    }),
+  );
+});
+
 test("la comptabilité du journal débite toujours les achats et crédite toujours +10", () => {
   const tokens = state([]).tokens;
   assert.deepEqual(
@@ -300,8 +370,5 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       "not-separated",
     );
   }
-  assert.equal(
-    canonical.separation.terminalFirstSeparatingLayer,
-    "robustness",
-  );
+  assert.equal(canonical.separation.terminalFirstSeparatingLayer, "robustness");
 });

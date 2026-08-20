@@ -498,11 +498,27 @@ test("la saisie rapide applique les coûts exacts de la période", () => {
   );
 });
 
+test("le troisième Hint ne partage plus son coût avec Energy +40", () => {
+  // GitHub issue #1: the in-game cost is 30. The OCR classifier separates hint
+  // from energy by cost when the label is unreadable, so the pair of ambiguous
+  // amounts must stay exactly two: 25 and 30.
+  const hint = getTechniqueLevelOptions("senior", "hint").map((l) => l.cost);
+  const energy = getTechniqueLevelOptions("senior", "energy").map(
+    (l) => l.cost,
+  );
+  assert.equal(hint.at(-1), 30);
+  assert.deepEqual(
+    hint.filter((cost) => energy.includes(cost)),
+    [25, 30],
+  );
+  assert.equal(hint.includes(35), false);
+});
+
 test("Hint et Energy gardent leurs trois niveaux à toutes les périodes", () => {
   for (const period of ["junior", "classic", "senior"] as const) {
     assert.deepEqual(
       getTechniqueLevelOptions(period, "hint").map((level) => level.cost),
-      [15, 25, 35],
+      [15, 25, 30],
     );
     assert.deepEqual(
       getTechniqueLevelOptions(period, "energy").map((level) => [

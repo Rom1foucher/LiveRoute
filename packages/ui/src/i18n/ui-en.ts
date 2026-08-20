@@ -449,6 +449,10 @@ export const UI_EN: Labels = {
     carryover: "Carryover",
     dynamicPool: (short: string) => `Dynamic pool · ${short}`,
     remainingCount: (n: number) => `${n} left`,
+    mixedOfferNote: (songs: number, techniques: number) =>
+      `Short pool: ${songs} song${songs > 1 ? "s" : ""} and ${techniques} technique${techniques > 1 ? "s" : ""} across the three cards.`,
+    postGrandLiveNote:
+      "After the Grand Live: no song is offered any more, techniques only.",
     filterInPool: "In the pool",
     filterOwned: "Bought",
     filterLocked: "Locked",
@@ -547,6 +551,9 @@ export const UI_EN: Labels = {
     manual: "Manual rebuild",
     modeDeSuivi: "Tracking mode",
     reset: "New run",
+    postGrandLive: "Grand Live played",
+    postGrandLiveHint: "Enter the final phase: techniques only",
+    postGrandLiveActive: "Post-Grand-Live phase",
     undo: "↶ Undo",
   },
 };

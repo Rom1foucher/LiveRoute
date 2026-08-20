@@ -48,7 +48,7 @@ assertEqual(
 
 const cargoLock = readFileSync("apps/desktop/src-tauri/Cargo.lock", "utf8");
 const cargoLockPackage = cargoLock.match(
-  /\[\[package\]\]\nname = "grand-live-carryover-planner-ocr"\nversion = "([^"]+)"/,
+  /\[\[package\]\]\r?\nname = "grand-live-carryover-planner-ocr"\r?\nversion = "([^"]+)"/,
 );
 assertEqual(
   "apps/desktop/src-tauri/Cargo.lock application package.version",

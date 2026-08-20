@@ -3,7 +3,10 @@ import { type LiveSnapshot, type WorkflowMode } from "../constants.tsx";
 
 type WorkflowBarProps = {
   concertIndex: number;
+  enterPostGrandLive: () => void;
   history: LiveSnapshot[];
+  postGrandLive: boolean;
+  postGrandLiveBlocked: boolean;
   resetRun: () => void;
   runPulseBeta: boolean;
   runPulseStartedAtConcert: number | null;
@@ -16,7 +19,10 @@ type WorkflowBarProps = {
 
 export function WorkflowBar({
   concertIndex,
+  enterPostGrandLive,
   history,
+  postGrandLive,
+  postGrandLiveBlocked,
   resetRun,
   runPulseBeta,
   runPulseStartedAtConcert,
@@ -80,6 +86,21 @@ export function WorkflowBar({
         >
           {L.workflow.undo}
         </button>
+        {postGrandLive ? (
+          <span className="utility-button active">
+            {L.workflow.postGrandLiveActive}
+          </span>
+        ) : (
+          <button
+            type="button"
+            className="utility-button"
+            disabled={postGrandLiveBlocked}
+            onClick={enterPostGrandLive}
+            title={L.workflow.postGrandLiveHint}
+          >
+            {L.workflow.postGrandLive}
+          </button>
+        )}
         <button type="button" className="utility-button" onClick={resetRun}>
           {L.workflow.reset}
         </button>

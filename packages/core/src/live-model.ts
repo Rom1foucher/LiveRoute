@@ -1631,7 +1631,9 @@ export const getTechniqueLevelOptions = (
 ): TechniqueLevelOption[] => {
   // Unlike ordinary stat/SP techniques, Hint and Energy levels are available
   // throughout the scenario. Their cost does not depend on the concert period.
-  const levels = kind === "hint" ? [15, 25, 35] : [25, 30, 35];
+  // Verified in game: the third Skill Hint level costs 30, not 35. Community
+  // references still list 35 (GitHub issue #1).
+  const levels = kind === "hint" ? [15, 25, 30] : [25, 30, 35];
   return levels.map((cost, index) => ({
     label: kind === "hint" ? `Lv. ${index + 1}` : `+${20 + index * 10}`,
     effect:

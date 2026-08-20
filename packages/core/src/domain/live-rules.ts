@@ -88,6 +88,41 @@ export const lessonOfferComposition = (
   return { songSlots, techniqueSlots: 3 - songSlots };
 };
 
+/**
+ * Training turns that remain after the Grand Live, before the career ends.
+ * Token income over these turns is negligible, so the post-Grand-Live phase is
+ * a bounded liquidation of the stock already held rather than a new economy.
+ */
+export const POST_GRAND_LIVE_TRAINING_TURNS = 3;
+
+export type PostGrandLiveEntryBlockReason =
+  "not-at-grand-live" | "already-post-grand-live";
+
+/**
+ * The post-Grand-Live phase is entered explicitly, like the ordinary concert
+ * transition, rather than inferred from an empty song offer: a carried song
+ * page survives the Grand Live and would otherwise look like an ongoing
+ * section.
+ */
+export const postGrandLiveEntryBlockReason = (input: {
+  concertIndex: number;
+  concertCount: number;
+  postGrandLive: boolean;
+}): PostGrandLiveEntryBlockReason | null => {
+  if (input.postGrandLive) return "already-post-grand-live";
+  if (input.concertIndex < input.concertCount - 1) return "not-at-grand-live";
+  return null;
+};
+
+/**
+ * After the Grand Live no new song page is offered. A page carried across the
+ * Grand Live keeps its songs, so the offer is only technique-only once that
+ * page is gone.
+ */
+export const postGrandLiveOfferSongPool = (
+  carriedPageSongCount: number,
+): number => Math.max(0, Math.trunc(carriedPageSongCount));
+
 export const automaticGaugeSongsForConcert = (
   concertIndex: number,
   rules: GrandLiveRuleSet = GRAND_LIVE_RULES,

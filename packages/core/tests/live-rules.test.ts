@@ -9,6 +9,9 @@ import {
   gaugeSongCount,
   isGreatSuccess,
   lessonOfferComposition,
+  postGrandLiveEntryBlockReason,
+  postGrandLiveOfferSongPool,
+  POST_GRAND_LIVE_TRAINING_TURNS,
   manualSongsForGreatSuccess,
   poolSizeForSection,
   techniquesForSongCycle,
@@ -151,6 +154,47 @@ test("une page de songs déjà portée peut traverser un autre concert", () => {
     }),
     null,
   );
+});
+
+test("l'entrée post-Grand Live est explicite et réservée au dernier concert", () => {
+  assert.equal(
+    postGrandLiveEntryBlockReason({
+      concertIndex: 4,
+      concertCount: 5,
+      postGrandLive: false,
+    }),
+    null,
+  );
+  assert.equal(
+    postGrandLiveEntryBlockReason({
+      concertIndex: 3,
+      concertCount: 5,
+      postGrandLive: false,
+    }),
+    "not-at-grand-live",
+  );
+  assert.equal(
+    postGrandLiveEntryBlockReason({
+      concertIndex: 4,
+      concertCount: 5,
+      postGrandLive: true,
+    }),
+    "already-post-grand-live",
+  );
+});
+
+test("après le Grand Live seule une page portée conserve des songs", () => {
+  // No page carried across the Grand Live: the three cards are techniques.
+  assert.deepEqual(lessonOfferComposition(postGrandLiveOfferSongPool(0)), {
+    songSlots: 0,
+    techniqueSlots: 3,
+  });
+  // A carried page keeps its songs and the offer stays mixed.
+  assert.deepEqual(lessonOfferComposition(postGrandLiveOfferSongPool(2)), {
+    songSlots: 2,
+    techniqueSlots: 1,
+  });
+  assert.equal(POST_GRAND_LIVE_TRAINING_TURNS, 3);
 });
 
 test("une pool sous trois songs produit une offre mixte song/technique", () => {

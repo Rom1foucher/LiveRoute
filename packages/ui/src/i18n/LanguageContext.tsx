@@ -39,7 +39,12 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>(detectLanguage);
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, language);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, language);
+    } catch {
+      // A saturated quota must not break the render; the language stays in
+      // memory for this session.
+    }
     document.documentElement.lang = language;
   }, [language]);
 

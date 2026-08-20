@@ -58,6 +58,8 @@ import {
   canonicalNumberKey,
   createTechniqueSimulationMemo,
   evaluateTechniqueStrategy,
+  lessonOfferComposition,
+  postGrandLiveEntryBlockReason,
   getDuoSplitSecondaryToken,
   getTechniqueLevelOptions,
   runAnalysis,
@@ -191,6 +193,7 @@ export default function App({
   const [carriedPageSongIds, setCarriedPageSongIds] = useState<string[] | null>(
     null,
   );
+  const [postGrandLive, setPostGrandLive] = useState(false);
   const [dynamicSpending, setDynamicSpending] = useState(false);
   const [timingMode, setTimingMode] = useState<TimingMode>("section-open");
   const [abandonedChaseTargetIds, setAbandonedChaseTargetIds] = useState<
@@ -260,7 +263,9 @@ export default function App({
     ? 0
     : Math.max(0, target - techniquesDone);
   const songSelectionOpen =
-    !patternUnsupported && (remaining === 0 || carriedPageSongIds !== null);
+    !patternUnsupported &&
+    (remaining === 0 || carriedPageSongIds !== null) &&
+    (!postGrandLive || carriedPageSongIds !== null);
   const manualGaugeTarget = manualSongsForGreatSuccess(concertIndex);
   const automaticGaugeSongs = automaticGaugeSongsForConcert(concertIndex);
   const gaugeSongs = gaugeSongCount(concertIndex, songsThisSection);
@@ -272,10 +277,19 @@ export default function App({
   const selectionSongs = availableSongs
     .filter((song) => selectedOfferIds.has(song.id))
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority]);
+  // After the Grand Live no new song page is offered: only a page carried
+  // across the Grand Live still holds songs.
+  const offerSongPool = postGrandLive
+    ? (carriedPageSongIds?.length ?? 0)
+    : availableSongs.length;
+  const offerComposition = lessonOfferComposition(offerSongPool);
   const expectedOfferCount =
     carriedPageSongIds !== null && visibleSongIds.size === 0
       ? carriedPageSongIds.length
-      : Math.min(3, availableSongs.length);
+      : offerComposition.songSlots;
+  // A short pool fills the missing cards with ordinary techniques, so the
+  // offer is complete with fewer than three songs.
+  const techniqueOfferSlots = offerComposition.techniqueSlots;
   const songOfferComplete =
     expectedOfferCount > 0 && selectionSongs.length === expectedOfferCount;
   // v0.22.16 made carryover repeatable: an active carryover no longer blocks
@@ -1082,6 +1096,7 @@ export default function App({
           generationProfile?: GenerationProfile;
           abandonedChaseTargetIds?: string[];
           huntState?: HuntState | null;
+          postGrandLive?: boolean;
         };
         if (
           session.workflowMode === "manual" ||
@@ -1156,6 +1171,9 @@ export default function App({
             ) as Balance,
           );
         }
+        if (typeof session.postGrandLive === "boolean") {
+          setPostGrandLive(session.postGrandLive);
+        }
         if (typeof session.dynamicSpending === "boolean") {
           setDynamicSpending(session.dynamicSpending);
         }
@@ -1216,38 +1234,48 @@ export default function App({
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem("gl-theme", theme);
+    try {
+      window.localStorage.setItem("gl-theme", theme);
+    } catch {
+      // The theme is cosmetic: a saturated quota must not break the render.
+    }
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
   useEffect(() => {
     if (!hydrated) return;
-    window.localStorage.setItem(
-      SESSION_STORAGE_KEY,
-      JSON.stringify({
-        workflowMode,
-        concertIndex,
-        techniqueOfferPeriod,
-        songCycle,
-        techniquesDone,
-        songsThisSection,
-        ownedSongs: Array.from(ownedSongs),
-        activeSongIds: Array.from(activeSongIds),
-        visibleSongIds: Array.from(visibleSongIds),
-        carriedPageSongIds,
-        tokens,
-        dynamicSpending,
-        timingMode,
-        runPulseBeta,
-        runPulseEvents,
-        runPulseStartedAtConcert,
-        solverMode,
-        riskProfile,
-        generationProfile,
-        abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
-        huntState,
-      }),
-    );
+    try {
+      window.localStorage.setItem(
+        SESSION_STORAGE_KEY,
+        JSON.stringify({
+          workflowMode,
+          concertIndex,
+          techniqueOfferPeriod,
+          songCycle,
+          techniquesDone,
+          songsThisSection,
+          ownedSongs: Array.from(ownedSongs),
+          activeSongIds: Array.from(activeSongIds),
+          visibleSongIds: Array.from(visibleSongIds),
+          carriedPageSongIds,
+          tokens,
+          dynamicSpending,
+          timingMode,
+          runPulseBeta,
+          runPulseEvents,
+          runPulseStartedAtConcert,
+          solverMode,
+          riskProfile,
+          generationProfile,
+          abandonedChaseTargetIds: Array.from(abandonedChaseTargetIds),
+          huntState,
+          postGrandLive,
+        }),
+      );
+    } catch {
+      // A saturated quota must never break the run: the state stays in memory
+      // and the next write retries once the log has been trimmed.
+    }
   }, [
     hydrated,
     workflowMode,
@@ -1271,6 +1299,7 @@ export default function App({
     generationProfile,
     abandonedChaseTargetIds,
     huntState,
+    postGrandLive,
   ]);
 
   useEffect(() => {
@@ -2096,6 +2125,7 @@ export default function App({
 
   const resetRun = () => {
     setWorkflowMode("live");
+    setPostGrandLive(false);
     setConcertIndex(0);
     setTechniqueOfferPeriod(null);
     setSongCycle(1);
@@ -2126,6 +2156,29 @@ export default function App({
     setSongPolicy(null);
     setForcePushOverride(false);
     setAnalysisOpen(false);
+  };
+
+  /**
+   * Explicit entry into the post-Grand-Live phase, mirroring the ordinary
+   * concert validation. The visible song page is dropped because the shop no
+   * longer refreshes songs; a carried page is kept and stays purchasable.
+   */
+  const enterPostGrandLive = () => {
+    if (
+      postGrandLiveEntryBlockReason({
+        concertIndex,
+        concertCount: CONCERTS.length,
+        postGrandLive,
+      }) !== null
+    ) {
+      return;
+    }
+    setPostGrandLive(true);
+    setVisibleSongIds(new Set());
+    setHuntState(null);
+    setAbandonedChaseTargetIds(new Set());
+    setResult(null);
+    setSongPolicy(null);
   };
 
   const chooseConcert = (index: number) => {
@@ -2300,6 +2353,8 @@ export default function App({
     changeForcePushOverride,
     setPipelineTimings,
     undoLastAction: undoLastLiveAction,
+    resetRun,
+    enterPostGrandLive,
     recordTechniquePurchase,
     runCurrentAnalysis,
     setAnalysisOpen,
@@ -2355,6 +2410,8 @@ export default function App({
     concertIndex,
     concertTransitionBlock,
     expectedOfferCount,
+    techniqueOfferSlots,
+    postGrandLive,
     gaugeSongs,
     manualGaugeTarget,
     nextSongCover,
@@ -2434,7 +2491,16 @@ export default function App({
 
         <WorkflowBar
           concertIndex={concertIndex}
+          enterPostGrandLive={enterPostGrandLive}
           history={history}
+          postGrandLive={postGrandLive}
+          postGrandLiveBlocked={
+            postGrandLiveEntryBlockReason({
+              concertIndex,
+              concertCount: CONCERTS.length,
+              postGrandLive,
+            }) !== null
+          }
           resetRun={resetRun}
           runPulseBeta={runPulseBeta}
           runPulseStartedAtConcert={runPulseStartedAtConcert}
@@ -2508,6 +2574,8 @@ export default function App({
           availableSongs={availableSongs}
           carriedPageSongIds={carriedPageSongIds}
           concert={concert}
+          postGrandLive={postGrandLive}
+          techniqueOfferSlots={techniqueOfferSlots}
           lockedSongs={lockedSongs}
           ownedBonusTotals={ownedBonusTotals}
           ownedSongs={ownedSongs}
