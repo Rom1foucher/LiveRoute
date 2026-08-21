@@ -31,6 +31,10 @@ import { classify069Crop } from "./digit-shape.ts";
 import { locateLearnedNumericField } from "./numeric-learning.ts";
 import { numericTextMatchesComponentCount } from "./numeric-learning-model.ts";
 import {
+  expectedSongCountForSnapshot,
+  songSlotsForSnapshot,
+} from "./snapshot-offer.ts";
+import {
   shouldPreferLearnedNumericReading,
   type LearnedNumericReading,
   type NumericReading,
@@ -210,6 +214,7 @@ const tokenReading = (
 const contentCrops = (
   page: SnapshotPage,
   profile: VisionProfile,
+  expectedSongCount: number,
 ): OcrCrop[] => {
   const crops: OcrCrop[] = TOKEN_KEYS.map((key) => ({
     id: `token.${key}`,
@@ -228,7 +233,8 @@ const contentCrops = (
       });
     });
   } else {
-    profile.regions.songs.forEach((card, slot) => {
+    songSlotsForSnapshot(expectedSongCount).forEach((slot) => {
+      const card = profile.regions.songs[slot];
       crops.push({
         id: `song.${slot}.title`,
         rect: card.title,
@@ -666,18 +672,23 @@ export const recognizeFrame = async (
   page: SnapshotPage,
 ): Promise<VisionSnapshot> => {
   const startedAt = performance.now();
+  const expectedSongCount = expectedSongCountForSnapshot(context);
   const decodeStartedAt = performance.now();
   const source = await loadImage(dataUrl);
   const decodeMs = performance.now() - decodeStartedAt;
   const primaryStartedAt = performance.now();
   const readings = await recognizeAtlas(
-    buildOcrAtlas(source, contentCrops(page, profile), profile),
+    buildOcrAtlas(
+      source,
+      contentCrops(page, profile, expectedSongCount),
+      profile,
+    ),
     profile,
     onProgress,
   );
   const ocrPrimaryMs = performance.now() - primaryStartedAt;
   const retryStartedAt = performance.now();
-  const numericFieldIds = contentCrops(page, profile)
+  const numericFieldIds = contentCrops(page, profile, expectedSongCount)
     .filter((crop) => crop.kind === "number")
     .map((crop) => crop.id);
   const learnedReadings = await retryLearnedNumericFields(
@@ -736,10 +747,6 @@ export const recognizeFrame = async (
     }),
   ) as VisionSnapshot["tokens"];
 
-  const expectedSongCount = Math.min(
-    3,
-    Math.max(0, Math.trunc(context.expectedSongCount ?? 3)),
-  );
   const techniques =
     page === "techniques"
       ? profile.regions.techniques.map((_, slot) =>
@@ -749,7 +756,7 @@ export const recognizeFrame = async (
   const songs =
     page === "songs"
       ? await Promise.all(
-          profile.regions.songs.slice(0, expectedSongCount).map((_, slot) => {
+          songSlotsForSnapshot(expectedSongCount).map((slot) => {
             const reading = readings.get(`song.${slot}.title`);
             return matchSong(
               slot,

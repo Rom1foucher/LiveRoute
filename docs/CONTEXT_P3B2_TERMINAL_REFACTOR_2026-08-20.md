@@ -890,3 +890,52 @@ Validation cumulée après ce lot :
 
 Le packaging Tauri natif reste non exécuté faute de `cargo`. Aucun fichier Rust
 et aucune règle du solver n'ont été modifiés par ce lot de parité.
+
+## 26. Parité OCR — pages de songs courtes
+
+Le cockpit OCR traite désormais correctement les offres mixtes qui n'exposent
+qu'une ou deux songs. La cardinalité canonique vient de la page portée par le
+shell partagé (`expectedOfferCount`) et non de la taille globale de la pool de
+songs débloquées.
+
+Cette distinction est nécessaire lors d'un carry : une page de deux songs
+ouverte avant un changement de section reste une page de deux songs, même si la
+nouvelle section rend ensuite d'autres songs disponibles. Elle ne regonfle plus
+artificiellement à trois cartes côté OCR.
+
+La même cardinalité pilote maintenant toute la chaîne Desktop :
+
+- création des zones OCR de songs ;
+- reconnaissance et rapprochement avec le catalogue ;
+- affichage des repères et de la revue rapide ;
+- sérialisation des lectures appliquées au snapshot ;
+- validation de complétude avant analyse.
+
+Les emplacements complétés par des techniques dans une offre mixte ne sont donc
+plus interprétés comme des songs manquantes. Une page à une ou deux songs ne
+demande que ces lectures réelles. Le repli sur la taille du catalogue reste
+présent pour les anciens appels qui ne fournissent pas encore de cardinalité
+explicite, avec une borne stricte de zéro à trois cartes.
+
+Contrats ajoutés :
+
+- une page portée de deux songs reste à deux malgré une pool globale plus
+  grande ;
+- une pool historique d'une song reste compatible sans cardinalité explicite ;
+- la cardinalité OCR est bornée aux trois cartes de Lessons ;
+- la validation d'une offre mixte de deux songs ignore une troisième song
+  pourtant disponible dans la pool globale.
+
+Validation cumulée après ce lot :
+
+- Core : `297 / 297` ;
+- UI : `19 / 19` ;
+- Desktop/OCR : `84 / 84` ;
+- total : `400 / 400` ;
+- typecheck Core/UI/Desktop/Web : OK ;
+- builds Web et frontend Desktop : OK ;
+- `check:docs` et `check:versions` : OK.
+
+Le packaging Tauri natif reste non exécuté faute de `cargo`. Aucun fichier Rust,
+aucune économie de carry et aucune règle du solver n'ont été modifiés par ce
+lot.

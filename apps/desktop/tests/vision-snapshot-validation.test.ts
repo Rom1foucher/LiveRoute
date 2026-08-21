@@ -120,7 +120,8 @@ test("une offre mixte à deux songs n'exige pas une troisième song inexistante"
     page: "songs",
     profile,
     context,
-    availableSongIds: ["a", "b"],
+    // A carried two-card page can coexist with a larger newly unlocked pool.
+    availableSongIds: ["a", "b", "c"],
     expectedSongCount: 2,
   });
   assert.equal(result.complete, true);

@@ -51,6 +51,10 @@ import {
   stockContinuityRequiresConfirmation,
 } from "./stock-continuity.ts";
 import { pendingOverlayPayload, tokenOverlayValues } from "./overlay-state.ts";
+import {
+  expectedSongCountForSnapshot,
+  songSlotsForSnapshot,
+} from "./snapshot-offer.ts";
 import { snapshotRunProgressionAction } from "./snapshot-run-controls.ts";
 import type { StockContinuityAssessment } from "./stock-continuity.ts";
 import type { DecisionSinkStatus, PipelineTimings } from "@glcp/core";
@@ -305,25 +309,32 @@ const buildAppliedVisionSnapshot = ({
         : [],
     songs:
       page === "songs"
-        ? draftSongs.map((songId, slot) => {
-            const reference = context.songs.find((song) => song.id === songId);
-            const original = snapshot.songs.find((song) => song.slot === slot);
-            return {
-              slot,
-              songId,
-              songName: reference?.name ?? "",
-              confidence: !songId
-                ? 0
-                : manuallyConfirmed
-                  ? 1
-                  : songId === original?.songId
-                    ? original.confidence
-                    : 1,
-              titleScore: original?.titleScore ?? 0,
-              coverScore: original?.coverScore ?? 0,
-              rawTitle: original?.rawTitle ?? "",
-            };
-          })
+        ? songSlotsForSnapshot(expectedSongCountForSnapshot(context)).map(
+            (slot) => {
+              const songId = draftSongs[slot];
+              const reference = context.songs.find(
+                (song) => song.id === songId,
+              );
+              const original = snapshot.songs.find(
+                (song) => song.slot === slot,
+              );
+              return {
+                slot,
+                songId,
+                songName: reference?.name ?? "",
+                confidence: !songId
+                  ? 0
+                  : manuallyConfirmed
+                    ? 1
+                    : songId === original?.songId
+                      ? original.confidence
+                      : 1,
+                titleScore: original?.titleScore ?? 0,
+                coverScore: original?.coverScore ?? 0,
+                rawTitle: original?.rawTitle ?? "",
+              };
+            },
+          )
         : [],
     warnings: Array.from(new Set(extraWarnings)),
     signature: "",
@@ -731,7 +742,8 @@ export default function SnapshotCompanionPanel({
     () => new Set(availableSongIds),
     [availableSongIds],
   );
-  const expectedSongCount = Math.min(3, availableSongIds.length);
+  const expectedSongCount = expectedSongCountForSnapshot(context);
+  const expectedSongSlots = songSlotsForSnapshot(expectedSongCount);
 
   useEffect(() => {
     if (open || snapshot || frame) return;
@@ -2318,17 +2330,23 @@ export default function SnapshotCompanionPanel({
                       />
                     ))}
                     {(resolvedPage === "techniques"
-                      ? profile.regions.techniques
-                      : profile.regions.songs
-                    ).map((item, index) => (
-                      <span
-                        className="snapshot-region card"
-                        style={rectToCss(item.card)}
-                        key={`card-${index}`}
-                      >
-                        {index + 1}
-                      </span>
-                    ))}
+                      ? [0, 1, 2]
+                      : expectedSongSlots
+                    ).map((slot) => {
+                      const item =
+                        resolvedPage === "techniques"
+                          ? profile.regions.techniques[slot]
+                          : profile.regions.songs[slot];
+                      return (
+                        <span
+                          className="snapshot-region card"
+                          style={rectToCss(item.card)}
+                          key={`card-${slot}`}
+                        >
+                          {slot + 1}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               ) : (
@@ -2665,7 +2683,7 @@ export default function SnapshotCompanionPanel({
                 </div>
               ) : (
                 <div className="snapshot-song-list">
-                  {[0, 1, 2].map((slot) => {
+                  {expectedSongSlots.map((slot) => {
                     const reading = snapshot?.songs.find(
                       (item) => item.slot === slot,
                     );
