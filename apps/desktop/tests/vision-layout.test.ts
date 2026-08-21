@@ -47,3 +47,16 @@ test("la fenêtre desktop ne peut plus être réduite sous la hauteur OCR sûre"
   assert.ok(main);
   assert.ok((main.minHeight ?? 0) >= 940);
 });
+
+test("les actions de run OCR réservent une place visible à Nouvelle run", async () => {
+  const css = await readFile(cssPath, "utf8");
+  assert.match(
+    css,
+    /\.snapshot-run-actions\s*\{[^}]*grid-template-columns:\s*auto auto minmax\(0, 1fr\)/s,
+  );
+  assert.match(css, /\.snapshot-reset-run\s*\{/);
+  assert.match(
+    css,
+    /\.snapshot-run-actions \.snapshot-next-concert\.active:disabled\s*\{[^}]*opacity:\s*1/s,
+  );
+});

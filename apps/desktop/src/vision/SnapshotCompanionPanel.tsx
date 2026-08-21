@@ -51,6 +51,7 @@ import {
   stockContinuityRequiresConfirmation,
 } from "./stock-continuity.ts";
 import { pendingOverlayPayload, tokenOverlayValues } from "./overlay-state.ts";
+import { snapshotRunProgressionAction } from "./snapshot-run-controls.ts";
 import type { StockContinuityAssessment } from "./stock-continuity.ts";
 import type { DecisionSinkStatus, PipelineTimings } from "@glcp/core";
 import type {
@@ -90,6 +91,8 @@ type SnapshotDecisionTools = {
   decisionLogStatus: DecisionSinkStatus | null;
   decisionLogError: string | null;
   canAdvanceConcert: boolean;
+  postGrandLive: boolean;
+  canEnterPostGrandLive: boolean;
   canUndo: boolean;
   automaticCarryoverPage: "songs" | "techniques" | null;
   advanceDisabledReason: string;
@@ -106,6 +109,7 @@ type SnapshotDecisionTools = {
   onClearDecisionLog: () => void;
   onUndo: () => void;
   onAdvanceConcert: () => boolean;
+  onEnterPostGrandLive: () => void;
   /** Clears the run state only. Calibration and learned OCR models survive. */
   onResetRun: () => void;
 };
@@ -1523,6 +1527,10 @@ export default function SnapshotCompanionPanel({
     : busy
       ? text("Lecture…", "Reading…")
       : text("Capturer maintenant", "Capture now");
+  const progressionAction = snapshotRunProgressionAction({
+    nextConcertLabel: decisionTools.nextConcertLabel,
+    postGrandLive: decisionTools.postGrandLive,
+  });
 
   const handlePrimarySnapshotAction = () => {
     if (pendingReview) {
@@ -1630,6 +1638,16 @@ export default function SnapshotCompanionPanel({
             `Concert recorded. ${decisionTools.nextConcertLabel} is ready.`,
           )
         : text("Concert enregistré.", "Concert recorded."),
+    );
+  };
+  const enterPostGrandLiveFromSnapshot = () => {
+    if (!decisionTools.canEnterPostGrandLive) return;
+    decisionTools.onEnterPostGrandLive();
+    clearAfterPurchase(
+      text(
+        "Grand Live enregistré. La phase finale est prête : aucune nouvelle page de songs ne sera proposée.",
+        "Grand Live recorded. The final phase is ready: no new song page will be offered.",
+      ),
     );
   };
   const resetRunFromSnapshot = () => {
@@ -1971,43 +1989,89 @@ export default function SnapshotCompanionPanel({
             </button>
             <button
               type="button"
-              className="snapshot-next-concert"
-              onClick={() => advanceConcertFromSnapshot()}
-              disabled={!decisionTools.canAdvanceConcert}
+              className={`snapshot-next-concert ${
+                progressionAction === "post-grand-live-active" ? "active" : ""
+              }`}
+              onClick={() => {
+                if (progressionAction === "advance-concert") {
+                  advanceConcertFromSnapshot();
+                } else if (progressionAction === "enter-post-grand-live") {
+                  enterPostGrandLiveFromSnapshot();
+                }
+              }}
+              disabled={
+                progressionAction === "post-grand-live-active" ||
+                (progressionAction === "advance-concert"
+                  ? !decisionTools.canAdvanceConcert
+                  : !decisionTools.canEnterPostGrandLive)
+              }
               title={
-                decisionTools.canAdvanceConcert
-                  ? decisionTools.advanceWarning
-                  : decisionTools.advanceDisabledReason
+                progressionAction === "advance-concert"
+                  ? decisionTools.canAdvanceConcert
+                    ? decisionTools.advanceWarning
+                    : decisionTools.advanceDisabledReason
+                  : text(
+                      "Passer en phase finale : techniques uniquement, sauf page de songs déjà portée.",
+                      "Enter the final phase: techniques only, except for an already carried song page.",
+                    )
               }
             >
-              <span>{text("Concert joué", "Concert played")}</span>
+              <span>
+                {progressionAction === "advance-concert"
+                  ? text("Concert joué", "Concert played")
+                  : text("Grand Live joué", "Grand Live played")}
+              </span>
               <strong>
-                {decisionTools.nextConcertLabel
-                  ? text(
-                      `Continuer vers ${decisionTools.nextConcertLabel}`,
-                      `Continue to ${decisionTools.nextConcertLabel}`,
-                    )
-                  : text("Grand Live · fin de run", "Grand Live · end of run")}
+                {progressionAction === "post-grand-live-active"
+                  ? text("Phase post-Grand Live", "Post-Grand-Live phase")
+                  : progressionAction === "enter-post-grand-live"
+                    ? text(
+                        "Passer en phase post-Grand Live",
+                        "Enter post-Grand-Live phase",
+                      )
+                    : decisionTools.nextConcertLabel
+                      ? text(
+                          `Continuer vers ${decisionTools.nextConcertLabel}`,
+                          `Continue to ${decisionTools.nextConcertLabel}`,
+                        )
+                      : null}
               </strong>
             </button>
-            <small className={decisionTools.advanceWarning ? "warning" : ""}>
-              {decisionTools.canAdvanceConcert
-                ? decisionTools.advanceWarning ||
-                  (decisionTools.automaticCarryoverPage === "songs"
-                    ? text(
-                        "La page de songs visible sera portée automatiquement.",
-                        "The visible song page will be carried automatically.",
-                      )
-                    : decisionTools.automaticCarryoverPage === "techniques"
-                      ? text(
-                          "La page de techniques visible sera portée automatiquement avec ses coûts actuels jusqu’au premier achat.",
-                          "The visible technique page will be carried automatically at its current costs until the first purchase.",
-                        )
-                      : text(
-                          "Cap et +10 seront appliqués à la transition.",
-                          "The cap and +10 will be applied at the transition.",
-                        ))
-                : decisionTools.advanceDisabledReason}
+            <small
+              className={
+                progressionAction === "advance-concert" &&
+                decisionTools.advanceWarning
+                  ? "warning"
+                  : ""
+              }
+            >
+              {progressionAction === "post-grand-live-active"
+                ? text(
+                    "Aucune nouvelle page de songs ; une page déjà portée reste achetable.",
+                    "No new song page; an already carried page remains purchasable.",
+                  )
+                : progressionAction === "enter-post-grand-live"
+                  ? text(
+                      "Termine le Grand Live puis active la phase finale, comme dans le mode Web.",
+                      "Finish the Grand Live, then enter the final phase, as in Web mode.",
+                    )
+                  : decisionTools.canAdvanceConcert
+                    ? decisionTools.advanceWarning ||
+                      (decisionTools.automaticCarryoverPage === "songs"
+                        ? text(
+                            "La page de songs visible sera portée automatiquement.",
+                            "The visible song page will be carried automatically.",
+                          )
+                        : decisionTools.automaticCarryoverPage === "techniques"
+                          ? text(
+                              "La page de techniques visible sera portée automatiquement avec ses coûts actuels jusqu’au premier achat.",
+                              "The visible technique page will be carried automatically at its current costs until the first purchase.",
+                            )
+                          : text(
+                              "Cap et +10 seront appliqués à la transition.",
+                              "The cap and +10 will be applied at the transition.",
+                            ))
+                    : decisionTools.advanceDisabledReason}
             </small>
           </div>
         </div>

@@ -843,3 +843,50 @@ Le replay P0 ne change aucune recommandation. Le seul cas modifié,
 Le packaging Tauri natif n'a pas été exécuté dans cet environnement car
 `cargo` n'y est pas installé. Le frontend Desktop et son typecheck sont
 validés ; aucun fichier Rust n'a été modifié.
+
+## 25. Parité Web/OCR — nouvelle run et post-Grand Live
+
+Deux divergences d'interface Desktop ont été corrigées sans modifier le
+solver :
+
+1. `Nouvelle run` était le troisième enfant d'une grille OCR à deux colonnes et
+   ne possédait aucun style dédié. Les actions utilisent désormais trois
+   colonnes explicites (`Annuler`, `Nouvelle run`, progression) et le reset a
+   un rendu stable aux différentes largeurs du cockpit.
+2. Au Grand Live, le cockpit OCR présentait la transition ordinaire désactivée
+   comme une simple « fin de run ». Le Web possédait déjà une action distincte
+   pour entrer dans l'horizon post-Grand Live.
+
+Le cockpit consomme maintenant le même `postGrandLiveBlocked` calculé dans le
+shell partagé. Sa progression possède trois états explicites :
+
+```text
+avant Grand Live       -> advance-concert
+Grand Live non validé  -> enter-post-grand-live
+post-Grand Live actif  -> post-grand-live-active
+```
+
+L'entrée OCR appelle directement `actions.enterPostGrandLive`. Le shell reste
+donc l'unique propriétaire de la transition : suppression des nouvelles offres
+de songs, conservation éventuelle d'une page déjà portée et horizon terminal
+de techniques. Une fois la phase active, le bouton devient un indicateur
+stable au lieu de ressembler à une transition en erreur.
+
+Contrats ajoutés :
+
+- les trois états de progression OCR sont testés ;
+- la grille réserve une colonne visible à `Nouvelle run` ;
+- l'indicateur post-Grand Live actif ne reprend pas l'opacité d'un bouton
+  désactivé ordinaire.
+
+Validation cumulée après ce lot :
+
+- Core : `297 / 297` ;
+- UI : `19 / 19` ;
+- Desktop/OCR : `81 / 81` ;
+- total : `397 / 397` ;
+- typecheck Core/UI/Desktop/Web : OK ;
+- builds Web et frontend Desktop : OK.
+
+Le packaging Tauri natif reste non exécuté faute de `cargo`. Aucun fichier Rust
+et aucune règle du solver n'ont été modifiés par ce lot de parité.

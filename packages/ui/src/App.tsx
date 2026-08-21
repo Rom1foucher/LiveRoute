@@ -300,6 +300,12 @@ export default function App({
     songSelectionReady: remaining === 0,
     songOfferComplete,
   });
+  const postGrandLiveBlocked =
+    postGrandLiveEntryBlockReason({
+      concertIndex,
+      concertCount: CONCERTS.length,
+      postGrandLive,
+    }) !== null;
   const solverContext = useMemo(
     () =>
       buildSolverStateContext({
@@ -2428,6 +2434,7 @@ export default function App({
     expectedOfferCount,
     techniqueOfferSlots,
     postGrandLive,
+    postGrandLiveBlocked,
     gaugeSongs,
     manualGaugeTarget,
     nextSongCover,
@@ -2510,13 +2517,7 @@ export default function App({
           enterPostGrandLive={enterPostGrandLive}
           history={history}
           postGrandLive={postGrandLive}
-          postGrandLiveBlocked={
-            postGrandLiveEntryBlockReason({
-              concertIndex,
-              concertCount: CONCERTS.length,
-              postGrandLive,
-            }) !== null
-          }
+          postGrandLiveBlocked={postGrandLiveBlocked}
           resetRun={resetRun}
           runPulseBeta={runPulseBeta}
           runPulseStartedAtConcert={runPulseStartedAtConcert}

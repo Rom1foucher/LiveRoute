@@ -667,6 +667,8 @@ export function SnapshotSlot({
         decisionLogStatus: diagnostics.decisionLogStatus,
         decisionLogError: diagnostics.decisionLogError,
         canAdvanceConcert: run.concertTransitionBlock === null,
+        postGrandLive: run.postGrandLive,
+        canEnterPostGrandLive: !run.postGrandLiveBlocked,
         canUndo: run.canUndo,
         automaticCarryoverPage: run.shouldCarryVisibleSongPage
           ? "songs"
@@ -698,6 +700,7 @@ export function SnapshotSlot({
         },
         onUndo: actions.undoLastAction,
         onAdvanceConcert: actions.advanceConcert,
+        onEnterPostGrandLive: actions.enterPostGrandLive,
         onResetRun: actions.resetRun,
       }}
       onApply={applySnapshot}

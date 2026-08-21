@@ -69,6 +69,8 @@ export type RunView = {
   techniqueOfferSlots: number;
   /** True once the Grand Live is played: techniques only, bounded horizon. */
   postGrandLive: boolean;
+  /** Same explicit entry guard used by the Web workflow action. */
+  postGrandLiveBlocked: boolean;
   songOfferComplete: boolean;
   songSelectionOpen: boolean;
   nextSongCover: string;
