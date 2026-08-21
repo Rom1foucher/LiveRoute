@@ -7,10 +7,6 @@ import {
   type HorizonOutcome,
   type OutcomeUncertainty,
 } from "./horizon-outcome.ts";
-import {
-  terminalCompatUtilityAssessmentFromOutcome,
-  type TerminalCompatUtilityAssessment,
-} from "./terminal-compat-utility.ts";
 
 export type TerminalTrialOutcomeInput = {
   tieId: string;
@@ -18,6 +14,8 @@ export type TerminalTrialOutcomeInput = {
   songsThisSection: number;
   /** Songs bought before the outgoing Live in this concrete paired trial. */
   currentSectionPurchases: number;
+  currentImmediateStatPoints?: number;
+  currentImmediateSkillPoints?: number;
   result: CrossSectionTrialResult;
   couplingKey: string;
 };
@@ -34,6 +32,8 @@ export const terminalHorizonOutcomeFromTrial = ({
   concertIndex,
   songsThisSection,
   currentSectionPurchases,
+  currentImmediateStatPoints = 0,
+  currentImmediateSkillPoints = 0,
   result,
   couplingKey,
 }: TerminalTrialOutcomeInput): HorizonOutcome => {
@@ -61,6 +61,16 @@ export const terminalHorizonOutcomeFromTrial = ({
       ),
       outcomeComponent("structural-tier", 0, "deterministic-consequence"),
       outcomeComponent(
+        "immediate-stat-delta",
+        currentImmediateStatPoints,
+        "deterministic-consequence",
+      ),
+      outcomeComponent(
+        "immediate-skill-points",
+        currentImmediateSkillPoints,
+        "deterministic-consequence",
+      ),
+      outcomeComponent(
         "expected-practice-stat-delta",
         result.practiceTrainingExposure,
         "generic-behavioral-projection",
@@ -68,7 +78,7 @@ export const terminalHorizonOutcomeFromTrial = ({
       ),
       outcomeComponent(
         "expected-skill-points",
-        result.lessonSkillPoints + result.spTrainingExposure,
+        result.spTrainingExposure,
         "generic-behavioral-projection",
         uncertainty,
       ),
@@ -125,8 +135,3 @@ export const terminalHorizonOutcomeFromTrial = ({
     ],
   });
 };
-
-export const terminalUtilityFromTrial = (
-  input: TerminalTrialOutcomeInput,
-): TerminalCompatUtilityAssessment =>
-  terminalCompatUtilityAssessmentFromOutcome(terminalHorizonOutcomeFromTrial(input));

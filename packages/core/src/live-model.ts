@@ -336,9 +336,30 @@ export type SongOutcome = {
   weightedFundingGap: number;
 };
 
+/**
+ * Compact terminal ranking payload shared with the observed-technique sorter.
+ *
+ * The tuple is intentionally typed and versioned by this source contract: the
+ * fields are layered native deltas, never a universal utility scalar. Keep the
+ * ordering synchronized with `terminalTechniqueDecisionVector()` and the
+ * decoder in `technique-dp.ts`.
+ */
+export type TerminalTechniqueDecisionVector = readonly [
+  pushRecommended: number,
+  riskState: number,
+  layeredState: number,
+  greatSuccessDelta: number,
+  structuralTier5Delta: number,
+  structuralTier4Delta: number,
+  structuralTier3Delta: number,
+  structuralTier2Delta: number,
+  mechanicalRewardDelta: number,
+  t2PracticeDelta: number,
+  t2SkillPointDelta: number,
+];
+
 export type TerminalUtilityBreakpoint = {
   parameter:
-    | "FRIENDSHIP_EXPOSURE_STAT_RATE"
     | "SKILL_POINT_UTILITY"
     | "SCENARIO_SKILL_UTILITY"
     | "SCENARIO_EVENT_UTILITY";
@@ -372,13 +393,22 @@ export type TerminalTechniqueDecisionSummary = {
   coRecommendationReason:
     | "monte-carlo-not-separated"
     | "calibration-sensitive"
+    | "resource-tradeoff"
     | "both"
     | null;
   /** Free/bounded utility rates whose admissible breakpoint can reverse this comparison. */
   calibrationSensitiveParameters: readonly string[];
   /** P6 full fixed-projection breakpoints; parameter names alone are not enough to audit a flip. */
   calibrationBreakpoints: readonly TerminalUtilityBreakpoint[];
-  /** P4 paired uncertainty for U(PUSH) - U(STOP) under common random numbers. */
+  /** First terminal layer that materially separates PUSH from STOP. */
+  decisionLayer: "risk" | "gate" | "structural" | "mechanical" | "t2" | "none";
+  /** Canonical metric inside `decisionLayer`; null only for a stable no-difference stop. */
+  decisionMetric: string | null;
+  /** PUSH - STOP delta in the native unit of `decisionMetric`. */
+  decisionDelta: number;
+  /** Paired 95 % interval in the same native unit as `decisionDelta`. */
+  decisionInterval: readonly [number, number];
+  /** P4 paired uncertainty for the decisive layered metric under common random numbers. */
   pairedUtility: {
     policy: "grand-live-robustness-v1";
     mean: number;
@@ -406,7 +436,7 @@ export type TerminalTechniqueDecisionSummary = {
   expectedCommittedCost: number;
   /** Shadow-price-weighted expected spend retained as resource telemetry. */
   expectedWeightedCommittedCost: number;
-  /** T1b utility of STOP_NOW, used as the explicit opportunity baseline. */
+  /** @deprecated Pre-P-T4 compatibility scalar for STOP. Telemetry only. */
   expectedOpportunityCost: number;
   /** Preferred operating threshold of the active risk profile. */
   riskThreshold: number;
@@ -418,11 +448,11 @@ export type TerminalTechniqueDecisionSummary = {
   reachConfidenceInterval: readonly [number, number];
   /** Compatibility alias for consumers that only need the lower bound. */
   reachConfidenceLowerBound: number;
-  /** Expected T1b utility of the best PUSH continuation. */
+  /** @deprecated Pre-P-T4 compatibility scalar for PUSH. Telemetry only. */
   grossValue: number;
   /** Explicit terminal risk penalty. P5 keeps this at zero; risk is an admission gate. */
   riskPenalty: number;
-  /** Paired expected utility delta U(PUSH) - U(STOP). */
+  /** @deprecated Pre-P-T4 compatibility scalar delta. Never drives policy. */
   netValue: number;
   stopCheckpointProbability: number;
   pushCheckpointProbability: number;
@@ -442,7 +472,7 @@ export type TerminalTechniqueDecisionSummary = {
   pushExpectedPracticeTrainingExposure: number;
   stopExpectedStructuralPurchases: number;
   pushExpectedStructuralPurchases: number;
-  decisionVector: readonly number[];
+  decisionVector: TerminalTechniqueDecisionVector;
 };
 
 export type AnalysisResult = {

@@ -252,7 +252,10 @@ action-validity
 physical-feasibility
 hard-state
 risk-admissibility
+structural-tier
 utility
+visible-song-cost
+generic-projection
 robustness
 stable-tie-break
 legacy-technique-ranking
@@ -273,13 +276,19 @@ separation: {
 
 For terminal STOP/PUSH:
 
-- MC/calibration `both` or MC not-separated -> `robustness`;
+- MC not-separated or a non-commensurable resource trade-off -> `robustness`;
 - a Wilson interval clearly below the admission threshold ->
   `risk-admissibility`;
-- otherwise a non-zero paired utility delta -> `utility`;
-- calibration-only co-recommendation after a nominal result -> `robustness` as
-  the uncertainty annotation;
+- Great Success -> `hard-state`;
+- Friendship/SP structural boundaries -> `structural-tier`;
+- deterministic immediate stat/SP reward -> `utility`;
+- generic practice/SP projection -> `generic-projection`;
 - exact residual equality -> `stable-tie-break`.
+
+The terminal replay payload additionally records `decisionLayer`,
+`decisionMetric`, `decisionDelta` and `decisionInterval` in the native unit of
+the decisive paired metric. Deprecated terminal scalar fields remain zero-valued
+compatibility aliases only.
 
 This diagnostic never changes the ranking; it explains the already-made
 ranking.

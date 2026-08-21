@@ -592,6 +592,7 @@ const terminalFirstSeparatingLayer = (
   if (!terminal) return null;
   if (
     terminal.coRecommendationReason === "monte-carlo-not-separated" ||
+    terminal.coRecommendationReason === "resource-tradeoff" ||
     terminal.coRecommendationReason === "both"
   ) {
     return "robustness";
@@ -599,11 +600,23 @@ const terminalFirstSeparatingLayer = (
   if (terminal.reachConfidenceInterval[1] < terminal.admissionThreshold) {
     return "risk-admissibility";
   }
-  if (terminal.netValue !== 0) return "utility";
   if (terminal.coRecommendationReason === "calibration-sensitive") {
     return "robustness";
   }
-  return "stable-tie-break";
+  switch (terminal.decisionLayer) {
+    case "risk":
+      return "risk-admissibility";
+    case "gate":
+      return "hard-state";
+    case "structural":
+      return "structural-tier";
+    case "mechanical":
+      return "utility";
+    case "t2":
+      return "generic-projection";
+    case "none":
+      return "stable-tie-break";
+  }
 };
 
 const rankReasonLayer = (
@@ -619,8 +632,10 @@ const rankReasonLayer = (
       return "risk-admissibility";
     case "terminal-hard-state":
       return "hard-state";
-    case "terminal-economy":
+    case "terminal-mechanical":
       return "utility";
+    case "terminal-generic-projection":
+      return "generic-projection";
     case "stable-id":
       return "stable-tie-break";
     default:

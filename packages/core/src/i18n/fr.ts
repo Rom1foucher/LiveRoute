@@ -9,6 +9,27 @@ const fixed0 = (value: number): string => (value * 100).toFixed(0);
 const tenth = (value: number): string => String(Math.round(value * 10) / 10);
 const whole = (value: number): string => String(Math.round(value));
 
+const terminalLayerFr = (layer: "gate" | "structural" | "mechanical" | "t2"): string =>
+  layer === "gate"
+    ? "objectif de concert"
+    : layer === "structural"
+      ? "cible structurelle"
+      : layer === "mechanical"
+        ? "gain immédiat"
+        : "bonus secondaire";
+
+const terminalMetricFr = (metric: string): string => {
+  if (metric === "great-success-secured") return "Great Success";
+  if (metric === "structural-tier-5") return "cible SP prioritaire";
+  if (metric === "structural-tier-4") return "Friendship +10 / cible forte";
+  if (metric === "structural-tier-3") return "Friendship +5";
+  if (metric === "structural-tier-2") return "cible structurelle secondaire";
+  if (metric === "mechanical-reward") return "stats/SP immédiats";
+  if (metric === "t2-practice") return "bonus de training";
+  if (metric === "t2-skill-points") return "bonus SP de training";
+  return metric;
+};
+
 const planLabelFr = (planId: PlanId, mode: PlanMode): string => {
   switch (planId) {
     case "convert-final":
@@ -282,16 +303,28 @@ export const renderFr = (message: Message): string => {
       return `EXPOSE_AND_CARRY justifié : ${renderFr(message.gain)}`;
     case "terminal.stopNowPageNotReached":
       return "STOP_NOW : la page portée n’est pas atteinte assez sûrement";
+    case "terminal.coRecommendedAlternative":
+      return message.action === "expose-and-carry"
+        ? "Alternative défendable : PUSH"
+        : "Alternative défendable : STOP";
     case "terminal.stopNowNotSeparated":
-      return message.coRecommendationReason === "both"
-        ? "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions et la calibration peut aussi inverser l’ordre"
-        : "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions";
+      return message.coRecommendationReason === "resource-tradeoff"
+        ? "STOP_NOW reste l’action principale ; PUSH est aussi défendable : le gain immédiat est réel, mais le modèle ne lui invente pas de taux d’échange contre les ressources dépensées"
+        : message.coRecommendationReason === "both"
+          ? "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions et la calibration peut aussi inverser l’ordre"
+          : "STOP_NOW reste l’action principale stable ; EXPOSE_AND_CARRY est co-recommandé car le Monte-Carlo apparié ne sépare pas les actions";
     case "terminal.stopNow":
       return `STOP_NOW : ${renderFr(message.gain)}`;
+    case "terminal.exposeAndCarryLayered":
+      return `PUSH · avantage ${terminalLayerFr(message.layer)} (${terminalMetricFr(message.metric)}) ${message.delta >= 0 ? "+" : ""}${tenth(message.delta)} · sécurité ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowLayered":
+      return `STOP · écart PUSH sur ${terminalLayerFr(message.layer)} (${terminalMetricFr(message.metric)}) ${message.delta >= 0 ? "+" : ""}${tenth(message.delta)} · sécurité ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
     case "terminal.exposeAndCarryValue":
       return `EXPOSE_AND_CARRY · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
     case "terminal.stopNowValue":
       return `STOP_NOW · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % (plancher ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowCatastropheFloorLayered":
+      return `STOP_NOW · borne basse reach ${pct1(message.reachLowerBound)} % sous le plancher catastrophe ${pct1(message.catastropheFloor)} %`;
     case "terminal.stopNowCatastropheFloor":
       return `STOP_NOW · valeur ${tenth(message.grossValue)} - coût d’opportunité ${tenth(message.opportunityCost)} - risque ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · borne basse reach ${pct1(message.reachLowerBound)} % sous le plancher catastrophe ${pct1(message.catastropheFloor)} %`;
 

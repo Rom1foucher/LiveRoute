@@ -4,6 +4,7 @@ import {
   canAfford,
   createTechniqueSimulationMemo,
   effectExposure,
+  immediatePracticeRewards,
   estimateRemainingTrainingsByFacility,
   simulateTechniqueTransition,
   subtractCost,
@@ -83,6 +84,8 @@ export type TransitionAwareTrialResult = {
   friendshipTrainingExposure: number;
   spTrainingExposure: number;
   practiceTrainingExposure: number;
+  immediateStatPoints: number;
+  immediateSkillPoints: number;
 };
 
 export type TransitionAwareSongPagesResult = {
@@ -104,6 +107,8 @@ export type TransitionAwareSongPagesResult = {
   expectedFriendshipTrainingExposure: number;
   expectedSpTrainingExposure: number;
   expectedPracticeTrainingExposure: number;
+  expectedImmediateStatPoints: number;
+  expectedImmediateSkillPoints: number;
   friendship10AcquisitionProbability: number;
   pages: number;
   /** Actual deterministic samples consumed after convergence. */
@@ -319,6 +324,8 @@ export const simulateTransitionAwareSongPagesTrial = (
   let friendshipPurchases = 0;
   let friendshipBonus = 0;
   let friendship10Acquired = false;
+  let immediateStatPoints = 0;
+  let immediateSkillPoints = 0;
   const acquiredEffects: AcquiredEffect[] = [];
   const remainingTrainingsByFacility = estimateRemainingTrainingsByFacility(
     generationProfile,
@@ -427,6 +434,9 @@ export const simulateTransitionAwareSongPagesTrial = (
       friendshipBonus += friendship;
       friendship10Acquired ||= friendship >= 10;
     }
+    const immediate = immediatePracticeRewards(selected.practiceBonus);
+    immediateStatPoints += immediate.statPoints;
+    immediateSkillPoints += immediate.skillPoints;
     acquiredEffects.push(
       ...acquiredEffectsForSong({
         song: selected,
@@ -465,6 +475,8 @@ export const simulateTransitionAwareSongPagesTrial = (
     friendshipTrainingExposure: effectExposure(acquiredEffects, "friendship"),
     spTrainingExposure: effectExposure(acquiredEffects, "sp-training"),
     practiceTrainingExposure: effectExposure(acquiredEffects, "practice"),
+    immediateStatPoints,
+    immediateSkillPoints,
   };
 };
 
@@ -531,6 +543,8 @@ export const evaluateTransitionAwareSongPages = (
   let friendshipTrainingExposureTotal = 0;
   let spTrainingExposureTotal = 0;
   let practiceTrainingExposureTotal = 0;
+  let immediateStatPointTotal = 0;
+  let immediateSkillPointTotal = 0;
   let friendship10Successes = 0;
   const techniqueMemo = createTechniqueSimulationMemo();
   const threshold = riskThreshold(input.riskProfile ?? "standard");
@@ -560,6 +574,8 @@ export const evaluateTransitionAwareSongPages = (
     friendshipTrainingExposureTotal += result.friendshipTrainingExposure;
     spTrainingExposureTotal += result.spTrainingExposure;
     practiceTrainingExposureTotal += result.practiceTrainingExposure;
+    immediateStatPointTotal += result.immediateStatPoints;
+    immediateSkillPointTotal += result.immediateSkillPoints;
     for (const key of TOKEN_KEYS) {
       retainedBalanceTotal[key] += result.retainedBalance[key];
     }
@@ -616,6 +632,8 @@ export const evaluateTransitionAwareSongPages = (
     expectedSpTrainingExposure: spTrainingExposureTotal / denominator,
     expectedPracticeTrainingExposure:
       practiceTrainingExposureTotal / denominator,
+    expectedImmediateStatPoints: immediateStatPointTotal / denominator,
+    expectedImmediateSkillPoints: immediateSkillPointTotal / denominator,
     friendship10AcquisitionProbability: friendship10Successes / denominator,
     pages: boundedPages,
     trials: denominator,

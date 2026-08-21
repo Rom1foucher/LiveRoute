@@ -173,19 +173,19 @@
       "id": "G102_E75_C4_CYCLE5_STOP",
       "runId": "GOLDEN_E75_20260815",
       "category": "c4-terminal",
-      "reviewStatus": "accepted",
+      "reviewStatus": "suspected-bug",
       "selector": { "event": "recommendation", "sequence": 154, "stateHash": "C4-6E60F028" },
       "expect": { "terminalCandidateId": "2", "terminalAction": "stop-now" },
-      "reason": "The same strong run later transitions to STOP when the deep continuation becomes materially worse. Protects bounded, not unconditional, C4 aggression."
+      "reason": "Historical solver STOP was immediately rejected by the player via a forced PUSH. Retained as evidence of the old terminal boundary, not as a behavioural oracle."
     },
     {
       "id": "G102_E75_C4_LATE_STOP",
       "runId": "GOLDEN_E75_20260815",
       "category": "c4-terminal",
-      "reviewStatus": "accepted",
+      "reviewStatus": "unknown",
       "selector": { "event": "recommendation", "sequence": 167, "stateHash": "C4-DE3DE5FC" },
       "expect": { "terminalCandidateId": "2", "terminalAction": "stop-now" },
-      "reason": "Late-C4 terminal STOP with high page reach but poor continuation value; ensures future layered robustness can still stop despite reachability."
+      "reason": "Historical nested terminal STOP is retained for audit, but its relationship to the user-level technique action is not strong enough to make it a golden oracle."
     },
     {
       "id": "G102_E75_C4_FIFTH_SONG",

@@ -27,8 +27,17 @@ test("v1.0.2 golden manifest is structurally valid and uses accepted explicit ch
   assert.equal(manifest.baseline.policyVersion, "grand-live-v6");
   assert.equal(manifest.baseline.releaseTag, "v1.0.2");
   assert.equal(manifest.checkpoints.length, 25);
-  assert.ok(
-    manifest.checkpoints.every((entry) => entry.reviewStatus === "accepted"),
+  assert.equal(
+    manifest.checkpoints.filter((entry) => entry.reviewStatus === "accepted").length,
+    23,
+  );
+  assert.equal(
+    manifest.checkpoints.filter((entry) => entry.reviewStatus === "suspected-bug").length,
+    1,
+  );
+  assert.equal(
+    manifest.checkpoints.filter((entry) => entry.reviewStatus === "unknown").length,
+    1,
   );
   assert.ok(
     manifest.checkpoints.some((entry) => entry.category === "carryover"),

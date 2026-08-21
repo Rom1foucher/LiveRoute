@@ -8,6 +8,7 @@ import {
   type Balance,
   type SolverStateContextInput,
 } from "../src/index.ts";
+import { terminalTechniqueDecisionVector } from "../src/solver/terminal-layered-value.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
   dance: 0,
@@ -112,7 +113,21 @@ test("le contexte de production reproduit s154 avec les offres réellement obser
     32,
   );
 
-  const commonTerminal = [1, 2, 1, 1, 0.8, 10, 1, 2, -60, 120] as const;
+  const commonTerminal = terminalTechniqueDecisionVector({
+    pushRecommended: true,
+    riskState: 2,
+    layeredState: 2,
+    metricMeans: {
+      "great-success-secured": 0,
+      "structural-tier-5": 0,
+      "structural-tier-4": 0,
+      "structural-tier-3": 0,
+      "structural-tier-2": 0,
+      "mechanical-reward": 0,
+      "t2-practice": 0,
+      "t2-skill-points": 0,
+    },
+  });
   const ranked = rankObservedTechniques({
     candidates: offers.map((cost, index) => ({
       id: `option-${index + 1}`,

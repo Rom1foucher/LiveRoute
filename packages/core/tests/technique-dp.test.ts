@@ -12,6 +12,10 @@ import {
 import { SONGS } from "../src/domain/song-data.ts";
 import { deriveStrategicPlan } from "../src/planner/strategic-plan.ts";
 import { rankObservedTechniques } from "../src/solver/technique-dp.ts";
+import {
+  terminalTechniqueDecisionVector,
+  type TerminalLayeredMetricId,
+} from "../src/solver/terminal-layered-value.ts";
 import { FIXTURE_MESSAGE, fr } from "./helpers/messages.ts";
 
 const balance = (partial: Partial<Balance> = {}): Balance => ({
@@ -22,6 +26,48 @@ const balance = (partial: Partial<Balance> = {}): Balance => ({
   mental: 0,
   ...partial,
 });
+
+
+const terminalVector = ({
+  pushRecommended = true,
+  riskState = 2,
+  layeredState = 2,
+  greatSuccess = 0,
+  tier5 = 0,
+  tier4 = 0,
+  tier3 = 0,
+  tier2 = 0,
+  mechanical = 0,
+  t2Practice = 0,
+  t2SkillPoints = 0,
+}: {
+  pushRecommended?: boolean;
+  riskState?: 0 | 1 | 2;
+  layeredState?: 0 | 1 | 2;
+  greatSuccess?: number;
+  tier5?: number;
+  tier4?: number;
+  tier3?: number;
+  tier2?: number;
+  mechanical?: number;
+  t2Practice?: number;
+  t2SkillPoints?: number;
+} = {}) =>
+  terminalTechniqueDecisionVector({
+    pushRecommended,
+    riskState,
+    layeredState,
+    metricMeans: {
+      "great-success-secured": greatSuccess,
+      "structural-tier-5": tier5,
+      "structural-tier-4": tier4,
+      "structural-tier-3": tier3,
+      "structural-tier-2": tier2,
+      "mechanical-reward": mechanical,
+      "t2-practice": t2Practice,
+      "t2-skill-points": t2SkillPoints,
+    } satisfies Record<TerminalLayeredMetricId, number>,
+  });
 
 const song = ({
   id,
@@ -440,7 +486,7 @@ test("à mêmes couleurs consommées, la technique strictement moins chère domi
         // Deliberately better noisy rollout: exact cost dominance must still win.
         reachProbability: 0.99,
         goalProbability: 0.99,
-        terminalDecisionVector: [1, 1, 2, 2],
+        terminalDecisionVector: terminalVector({ tier4: 0.5 }),
         payload: null,
       },
       {
@@ -448,7 +494,7 @@ test("à mêmes couleurs consommées, la technique strictement moins chère domi
         cost: balance({ dance: 24 }),
         reachProbability: 0.93,
         goalProbability: 0.93,
-        terminalDecisionVector: [1, 1, 1, 1],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
     ],
@@ -531,9 +577,7 @@ test("replay C4 : une réserve déterministe bat quelques points de Monte-Carlo"
         cost: balance({ visual: 25 }),
         reachProbability: 1,
         goalProbability: 0.9821428571,
-        terminalDecisionVector: [
-          1, 1, 2, 1, 0.7433, 11.8167, 1, 1.79, -25, 99.16,
-        ],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
       {
@@ -541,9 +585,7 @@ test("replay C4 : une réserve déterministe bat quelques points de Monte-Carlo"
         cost: balance({ vocal: 25 }),
         reachProbability: 1,
         goalProbability: 0.9285714286,
-        terminalDecisionVector: [
-          1, 1, 2, 1, 0.9433, 12.9667, 1, 1.7267, -25, 103.61,
-        ],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
       {
@@ -551,9 +593,7 @@ test("replay C4 : une réserve déterministe bat quelques points de Monte-Carlo"
         cost: balance({ passion: 12, vocal: 12 }),
         reachProbability: 1,
         goalProbability: 1,
-        terminalDecisionVector: [
-          1, 1, 2, 1, 0.91, 12.5833, 1, 1.6867, -24, 111.26,
-        ],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
     ],
@@ -605,9 +645,7 @@ test("des micro-écarts 99/100 % ne justifient plus un gros surcoût", () => {
         cost: balance({ passion: 16 }),
         reachProbability: 1,
         goalProbability: 0.5,
-        terminalDecisionVector: [
-          1, 1, 2, 2, 0.99, 21.7167, 1, 2.95, -31.82, 117.5,
-        ],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
       {
@@ -615,9 +653,7 @@ test("des micro-écarts 99/100 % ne justifient plus un gros surcoût", () => {
         cost: balance({ dance: 25 }),
         reachProbability: 1,
         goalProbability: 0.5,
-        terminalDecisionVector: [
-          1, 1, 2, 2, 0.9967, 21.4833, 1, 2.94, -40.81, 115.84,
-        ],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
       {
@@ -625,7 +661,7 @@ test("des micro-écarts 99/100 % ne justifient plus un gros surcoût", () => {
         cost: balance({ vocal: 30 }),
         reachProbability: 1,
         goalProbability: 0.5,
-        terminalDecisionVector: [1, 1, 2, 2, 1, 21.5, 1, 2.91, -45.81, 108.01],
+        terminalDecisionVector: terminalVector(),
         payload: null,
       },
     ],
@@ -691,9 +727,7 @@ test("replay seq143 : la frontière F+10 évite le faux plancher Vocal et prése
         cost: balance({ vocal: 24 }),
         reachProbability: 0.9765625,
         goalProbability: 0.9765625,
-        terminalDecisionVector: [
-          1, 2, 1, 1, 0.8967, 8.9667, 0.98, 1.85, -67.95, 136.09,
-        ],
+        terminalDecisionVector: terminalVector({ tier4: 0.35 }),
         payload: null,
       },
       {
@@ -701,9 +735,7 @@ test("replay seq143 : la frontière F+10 évite le faux plancher Vocal et prése
         cost: balance({ visual: 30 }),
         reachProbability: 1,
         goalProbability: 1,
-        terminalDecisionVector: [
-          1, 2, 1, 1, 0.7967, 11.7, 1, 2.32, -75.56, 135.66,
-        ],
+        terminalDecisionVector: terminalVector({ tier4: 0.3 }),
         payload: null,
       },
       {
@@ -711,9 +743,7 @@ test("replay seq143 : la frontière F+10 évite le faux plancher Vocal et prése
         cost: balance({ dance: 12, vocal: 12 }),
         reachProbability: 0.9951171875,
         goalProbability: 0.9951171875,
-        terminalDecisionVector: [
-          1, 2, 1, 1, 0.87, 12.6667, 0.9967, 2.5633, -69.24, 114.53,
-        ],
+        terminalDecisionVector: terminalVector({ tier4: 0.4 }),
         payload: null,
       },
     ],
@@ -764,7 +794,7 @@ test("contre-régression seq122 : 15 Visual peut rester meilleur que 24 ailleurs
     plan,
   );
 
-  const commonTerminal = [1, 2, 1, 1, 0.84, 12, 1, 2, -60, 140] as const;
+  const commonTerminal = terminalVector();
   const ranked = rankObservedTechniques({
     candidates: [
       {
@@ -870,7 +900,7 @@ test("P1 v0.24 replay fbde s154 : Fanfare infaisable cède l'ancre à Harusora",
     /Fanfare.*infaisable|infaisable.*Fanfare/i,
   );
 
-  const commonTerminal = [1, 2, 1, 1, 0.8, 10, 1, 2, -60, 120] as const;
+  const commonTerminal = terminalVector();
   const ranked = rankObservedTechniques({
     candidates: offers.map((cost, index) => ({
       id: `option-${index + 1}`,
@@ -931,7 +961,7 @@ test("PR-4 : le ranking terminal ne réapplique pas le cliff Standard 92 %", () 
         reachProbability: 0.9,
         goalProbability: 0.9,
         // Terminal policy says PUSH: above catastrophe floor and net-positive.
-        terminalDecisionVector: [1, 1, 1, 1, 0.8, 120, 0, 0, -20, 100],
+        terminalDecisionVector: terminalVector({ pushRecommended: true, riskState: 2, layeredState: 2, tier4: 0.3 }),
         payload: null,
       },
       {
@@ -939,7 +969,7 @@ test("PR-4 : le ranking terminal ne réapplique pas le cliff Standard 92 %", () 
         cost: balance({ vocal: 20 }),
         reachProbability: 0.94,
         goalProbability: 0.94,
-        terminalDecisionVector: [0, 2, 0, 1, 0, 0, 0, 0, -20, 100],
+        terminalDecisionVector: terminalVector({ pushRecommended: false, riskState: 2, layeredState: 0 }),
         payload: null,
       },
     ],
@@ -1073,18 +1103,19 @@ test("PR-7 property : le ranking de triplets aléatoires est invariant aux six p
         goalProbability: 0.65 + random() * 0.35,
         terminalDecisionVector:
           random() > 0.5
-            ? [
-                1,
-                1,
-                Math.floor(random() * 3),
-                1,
-                random(),
-                random() * 30,
-                random(),
-                random() * 4,
-                -random() * 80,
-                random() * 200,
-              ]
+            ? terminalVector({
+                pushRecommended: true,
+                riskState: 1,
+                layeredState: Math.floor(random() * 3) as 0 | 1 | 2,
+                greatSuccess: random() > 0.5 ? 1 : 0,
+                tier5: random(),
+                tier4: random(),
+                tier3: random(),
+                tier2: random(),
+                mechanical: random() * 30,
+                t2Practice: random() * 80,
+                t2SkillPoints: random() * 50,
+              })
             : undefined,
         payload: null,
       };

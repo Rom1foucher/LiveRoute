@@ -113,8 +113,10 @@ test("C4 sous 18 ne pousse pas une chaîne de fillers uniquement pour le compteu
   assert.equal(assessments[0].action, "stop-now");
   assert.equal(assessments[0].trials, 80);
   assert.equal(assessments[0].seedKey, "terminal-technique:crn");
-  assert.equal(assessments[0].reason.code, "terminal.stopNowValue");
-  assert.match(fr(assessments[0].reason), /coût pondéré|net/);
+  assert.equal(assessments[0].reason.code, "terminal.stopNowNotSeparated");
+  assert.deepEqual(assessments[0].coRecommended, ["expose-and-carry"]);
+  assert.equal(assessments[0].coRecommendationReason, "resource-tradeoff");
+  assert.match(fr(assessments[0].reason), /taux d’échange|ressources/);
   assert.ok(assessments[0].expectedCommittedCost >= 20);
   assert.ok(
     assessments[0].expectedWeightedCommittedCost >=
@@ -184,7 +186,7 @@ test("C1 valorise naturellement une page bon marché pouvant révéler et achete
   assert.ok(cheapVisual);
   assert.equal(cheapVisual.action, "expose-and-carry");
   assert.ok(cheapVisual.pushExpectedFriendshipBonus > 0);
-  assert.match(fr(cheapVisual.reason), /valeur|Friendship|structurel/);
+  assert.match(fr(cheapVisual.reason), /Friendship|cible structurelle/);
 });
 
 test("P5 : un filler terminal peut rester rentable par ses rewards réels sans valeur intrinsèque des tokens", () => {
@@ -219,7 +221,12 @@ test("P5 : un filler terminal peut rester rentable par ses rewards réels sans v
   });
   assert.ok(assessments);
   assert.equal(assessments[0].action, "expose-and-carry");
-  assert.ok(assessments[0].grossValue > assessments[0].expectedOpportunityCost);
+  assert.equal(assessments[0].decisionLayer, "gate");
+  assert.equal(assessments[0].decisionMetric, "great-success-secured");
+  assert.equal(assessments[0].decisionDelta, 1);
+  assert.equal(assessments[0].grossValue, 0);
+  assert.equal(assessments[0].expectedOpportunityCost, 0);
+  assert.equal(assessments[0].netValue, 0);
   assert.equal(assessments[0].riskPenalty, 0);
 });
 
@@ -266,13 +273,17 @@ test("P5 : une Friendship portée au Grand Live vaut ses rewards finaux, pas un 
   assert.equal(assessment.pushFriendship10Probability, 1);
   assert.equal(assessment.pushExpectedFriendshipTrainingExposure, 0);
   assert.equal(assessment.pushEffectiveFriendship10Probability, 0);
-  assert.equal(assessment.action, "expose-and-carry");
-  assert.equal(assessment.reason.code, "terminal.exposeAndCarryValue");
+  // The late Friendship has no training horizon. Carrying it still exposes real
+  // Lesson SP, but before the Grand Live that reward trades off against spent
+  // resources. P-T4 refuses to invent a token↔SP exchange rate: STOP is the
+  // stable primary and PUSH remains explicit as a defensible alternative.
+  assert.equal(assessment.action, "stop-now");
+  assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
+  assert.equal(assessment.coRecommendationReason, "resource-tradeoff");
+  assert.equal(assessment.decisionLayer, "mechanical");
+  assert.equal(assessment.decisionMetric, "mechanical-reward");
+  assert.ok(assessment.decisionDelta > 0);
   assert.ok(assessment.expectedWeightedCommittedCost >= 20);
-  // Friendship activates too late to create training exposure, but the carried
-  // song still converts into +25 Lesson SP and crosses the discrete 18-song gate.
-  assert.ok(assessment.grossValue >= 75);
-  assert.ok(assessment.netValue > 0);
 });
 
 test("PR-5.1 : le rollout terminal transmet les demandes aval aux techniques futures", () => {
@@ -394,10 +405,13 @@ test("C4 replay C4-89AB27AB : le gros stock pousse malgré un spend brut supéri
   const best = assessments[0];
   assert.ok(best);
   assert.equal(best.action, "expose-and-carry");
-  assert.ok(best.grossValue > 0);
+  assert.equal(best.decisionLayer, "gate");
+  assert.equal(best.decisionMetric, "great-success-secured");
+  assert.equal(best.decisionDelta, 1);
   assert.ok(best.expectedWeightedCommittedCost > 0);
-  assert.ok(best.expectedOpportunityCost < best.grossValue);
-  assert.ok(best.netValue > 0);
+  assert.equal(best.grossValue, 0);
+  assert.equal(best.expectedOpportunityCost, 0);
+  assert.equal(best.netValue, 0);
   assert.equal(best.riskPenalty, 0);
 });
 
@@ -454,10 +468,17 @@ test("hotfix v6 replay C4 : un miss ne retombe plus sur le coût brut quand le s
   );
   assert.ok(
     assessments.every(
-      (assessment) => assessment.grossValue > assessment.expectedOpportunityCost,
+      (assessment) =>
+        assessment.decisionLayer === "gate" &&
+        assessment.decisionMetric === "great-success-secured" &&
+        assessment.decisionDelta === 1,
     ),
   );
-  assert.ok(assessments.every((assessment) => assessment.netValue > 0));
+  assert.ok(assessments.every((assessment) => assessment.grossValue === 0));
+  assert.ok(
+    assessments.every((assessment) => assessment.expectedOpportunityCost === 0),
+  );
+  assert.ok(assessments.every((assessment) => assessment.netValue === 0));
   assert.ok(assessments.every((assessment) => assessment.riskPenalty === 0));
 });
 
@@ -516,7 +537,7 @@ test("hotfix v6 : le budget temporel terminal rend la main avec un diagnostic d'
   assert.ok(assessments.every((assessment) => assessment.trials < 7200));
 });
 
-test("P4 boundary: paired MC uncertainty co-recommends instead of forcing a noisy winner", () => {
+test("P-T4 boundary: a real immediate gain cannot invent an exchange rate against spent resources", () => {
   const currentSongs = [
     "daisuki",
     "fanfare",
@@ -556,21 +577,18 @@ test("P4 boundary: paired MC uncertainty co-recommends instead of forcing a nois
   assert.ok(assessment);
   assert.equal(assessment.action, "stop-now");
   assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
-  assert.equal(
-    assessment.coRecommendationReason,
-    "monte-carlo-not-separated",
-  );
+  assert.equal(assessment.coRecommendationReason, "resource-tradeoff");
   assert.deepEqual(assessment.calibrationSensitiveParameters, []);
+  assert.equal(assessment.decisionLayer, "mechanical");
+  assert.equal(assessment.decisionMetric, "mechanical-reward");
+  assert.ok(assessment.decisionDelta > 0);
   assert.equal(assessment.pairedUtility.confidenceLevel, 0.95);
   assert.equal(assessment.pairedUtility.samples, 80);
   assert.equal(assessment.pairedUtility.maxSamples, 80);
-  assert.equal(assessment.pairedUtility.separation, "not-separated");
-  assert.equal(assessment.pairedUtility.convergenceReason, "max-samples");
-  assert.ok(assessment.pairedUtility.interval[0] < 0);
-  assert.ok(assessment.pairedUtility.interval[1] > 0);
+  assert.equal(assessment.pairedUtility.separation, "above");
 });
 
-test("P4 boundary: Monte-Carlo and calibration uncertainty are reported as both", () => {
+test("P-T4 boundary: a separated structural target beats the obsolete compatibility scalar", () => {
   const currentSongs = [
     "daisuki",
     "fanfare",
@@ -607,25 +625,17 @@ test("P4 boundary: Monte-Carlo and calibration uncertainty are reported as both"
   })?.[0];
 
   assert.ok(assessment);
-  assert.equal(assessment.action, "stop-now");
-  assert.deepEqual(assessment.coRecommended, ["expose-and-carry"]);
-  assert.equal(assessment.coRecommendationReason, "both");
-  assert.ok(assessment.calibrationBreakpoints.length > 0);
-  assert.deepEqual(
-    assessment.calibrationBreakpoints.map((breakpoint) => breakpoint.parameter),
-    assessment.calibrationSensitiveParameters,
-  );
-  assert.ok(
-    assessment.calibrationBreakpoints.every(
-      (breakpoint) =>
-        breakpoint.scope === "fixed-projection-policy" &&
-        breakpoint.projectionPolicy === "grand-live-zero-income-v1",
-    ),
-  );
-  assert.ok(
-    assessment.calibrationSensitiveParameters.includes("SKILL_POINT_UTILITY"),
-  );
-  assert.equal(assessment.pairedUtility.separation, "not-separated");
-  assert.ok(assessment.pairedUtility.interval[0] < 0);
-  assert.ok(assessment.pairedUtility.interval[1] > 0);
+  assert.equal(assessment.action, "expose-and-carry");
+  assert.deepEqual(assessment.coRecommended, []);
+  assert.equal(assessment.coRecommendationReason, null);
+  assert.deepEqual(assessment.calibrationBreakpoints, []);
+  assert.deepEqual(assessment.calibrationSensitiveParameters, []);
+  assert.equal(assessment.decisionLayer, "structural");
+  assert.equal(assessment.decisionMetric, "structural-tier-4");
+  assert.ok(assessment.decisionDelta > 0.8);
+  assert.equal(assessment.pairedUtility.separation, "above");
+  // The retired scalar no longer exists even as terminal telemetry.
+  assert.equal(assessment.grossValue, 0);
+  assert.equal(assessment.expectedOpportunityCost, 0);
+  assert.equal(assessment.netValue, 0);
 });

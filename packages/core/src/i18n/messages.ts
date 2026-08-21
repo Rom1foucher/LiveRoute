@@ -172,13 +172,34 @@ export type Message =
   | { code: "terminal.exposeAndCarry"; gain: Message }
   | { code: "terminal.stopNowPageNotReached" }
   | {
+      code: "terminal.coRecommendedAlternative";
+      action: "stop-now" | "expose-and-carry";
+    }
+  | {
       code: "terminal.stopNowNotSeparated";
       coRecommendationReason:
         | "monte-carlo-not-separated"
         | "calibration-sensitive"
+        | "resource-tradeoff"
         | "both";
     }
   | { code: "terminal.stopNow"; gain: Message }
+  | {
+      code: "terminal.exposeAndCarryLayered";
+      layer: "gate" | "structural" | "mechanical" | "t2";
+      metric: string;
+      delta: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
+  | {
+      code: "terminal.stopNowLayered";
+      layer: "gate" | "structural" | "mechanical" | "t2";
+      metric: string;
+      delta: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
   | {
       code: "terminal.exposeAndCarryValue";
       grossValue: number;
@@ -194,6 +215,11 @@ export type Message =
       opportunityCost: number;
       riskPenalty: number;
       netValue: number;
+      reachLowerBound: number;
+      catastropheFloor: number;
+    }
+  | {
+      code: "terminal.stopNowCatastropheFloorLayered";
       reachLowerBound: number;
       catastropheFloor: number;
     }

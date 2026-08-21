@@ -5,6 +5,7 @@ import {
   canAfford,
   effectExposure,
   estimateRemainingTrainingsByFacility,
+  immediatePracticeRewards,
   simulateTechniqueTransition,
   subtractCost,
   techniqueSpendMetrics,
@@ -44,27 +45,28 @@ import {
   canonicalNumberKey,
   createPairedDifferenceStats,
   probabilityEstimateStable,
+  pairedMeanInterval,
   wilsonInterval,
   type PairedDifferenceStats,
 } from "../monte-carlo.ts";
 import {
-  compareTerminalCompatUtilityAssessments,
-  terminalCompatBreakpointsFromLinearTerms,
-  type TerminalCompatLinearTerms,
-  type TerminalCompatParameterId,
-  type TerminalCompatUtilityAssessment,
-} from "./terminal-compat-utility.ts";
-import {
-  calibrationSensitive,
-  coRecommendationReason,
   pairedUtilityRobustness,
-  stableCoRecommendationPrimary,
   ROBUSTNESS_BATCH_SIZE,
   ROBUSTNESS_DEFAULT_MAX_SAMPLES,
   ROBUSTNESS_DEFAULT_MIN_SAMPLES,
   ROBUSTNESS_NORMAL_Z,
 } from "./robustness.ts";
-import { terminalUtilityFromTrial } from "./terminal-outcome.ts";
+import {
+  compareTerminalLayeredTrialValues,
+  decideTerminalLayeredEvidence,
+  classifyTerminalLayeredMetric,
+  terminalLayeredMetricValue,
+  terminalLayeredTrialValue,
+  terminalTechniqueDecisionVector,
+  TERMINAL_LAYERED_METRIC_ORDER,
+  type TerminalLayeredMetricId,
+  type TerminalLayeredTrialValue,
+} from "./terminal-layered-value.ts";
 
 export type TerminalTechniqueCandidate = {
   id: string;
@@ -74,7 +76,7 @@ export type TerminalTechniqueCandidate = {
 export type TerminalTechniqueOptionAssessment =
   TerminalTechniqueDecisionSummary & {
     candidateId: string;
-    decisionVector: readonly number[];
+    decisionVector: TerminalTechniqueDecisionSummary["decisionVector"];
   };
 
 export type TerminalTechniqueOptionsInput = {
@@ -111,6 +113,39 @@ const wallClockNow = (): number =>
     ? globalThis.performance.now()
     : Date.now();
 
+type LayeredPairedStats = Record<TerminalLayeredMetricId, PairedDifferenceStats>;
+
+const createLayeredPairedStats = (): LayeredPairedStats =>
+  Object.fromEntries(
+    TERMINAL_LAYERED_METRIC_ORDER.map((metric) => [
+      metric,
+      createPairedDifferenceStats(),
+    ]),
+  ) as LayeredPairedStats;
+
+const addLayeredPairedDifference = (
+  stats: LayeredPairedStats,
+  push: TerminalLayeredTrialValue | null,
+  stop: TerminalLayeredTrialValue,
+): void => {
+  for (const metric of TERMINAL_LAYERED_METRIC_ORDER) {
+    addPairedDifference(
+      stats[metric],
+      (push ? terminalLayeredMetricValue(push, metric) : 0) -
+        terminalLayeredMetricValue(stop, metric),
+    );
+  }
+};
+
+const layeredEvidenceFromStats = (stats: LayeredPairedStats) =>
+  TERMINAL_LAYERED_METRIC_ORDER.map((metric) =>
+    classifyTerminalLayeredMetric({
+      metric,
+      mean: stats[metric].mean,
+      interval: pairedMeanInterval(stats[metric], ROBUSTNESS_NORMAL_Z),
+    }),
+  );
+
 type Aggregate = {
   completions: number;
   checkpoints: number;
@@ -127,53 +162,6 @@ type Aggregate = {
   committedCost: number;
   weightedCommittedCost: number;
 };
-
-const UTILITY_PARAMETER_IDS: readonly TerminalCompatParameterId[] = [
-  "FRIENDSHIP_EXPOSURE_STAT_RATE",
-  "SKILL_POINT_UTILITY",
-  "SCENARIO_SKILL_UTILITY",
-  "SCENARIO_EVENT_UTILITY",
-];
-
-type UtilityLinearAggregate = {
-  fixedStatPoints: number;
-  coefficients: Record<TerminalCompatParameterId, number>;
-};
-
-const emptyUtilityLinearAggregate = (): UtilityLinearAggregate => ({
-  fixedStatPoints: 0,
-  coefficients: {
-    FRIENDSHIP_EXPOSURE_STAT_RATE: 0,
-    SKILL_POINT_UTILITY: 0,
-    SCENARIO_SKILL_UTILITY: 0,
-    SCENARIO_EVENT_UTILITY: 0,
-  },
-});
-
-const addUtilityLinearTerms = (
-  aggregate: UtilityLinearAggregate,
-  assessment: TerminalCompatUtilityAssessment | null,
-): void => {
-  if (!assessment) return;
-  aggregate.fixedStatPoints += assessment.linearTerms.fixedStatPoints;
-  for (const parameter of UTILITY_PARAMETER_IDS) {
-    aggregate.coefficients[parameter] +=
-      assessment.linearTerms.coefficients[parameter];
-  }
-};
-
-const normalizedUtilityLinearTerms = (
-  aggregate: UtilityLinearAggregate,
-  samples: number,
-): TerminalCompatLinearTerms => ({
-  fixedStatPoints: aggregate.fixedStatPoints / Math.max(1, samples),
-  coefficients: Object.fromEntries(
-    UTILITY_PARAMETER_IDS.map((parameter) => [
-      parameter,
-      aggregate.coefficients[parameter] / Math.max(1, samples),
-    ]),
-  ) as Record<TerminalCompatParameterId, number>,
-});
 
 const emptyAggregate = (): Aggregate => ({
   completions: 0,
@@ -294,7 +282,7 @@ const assertNever = (value: never): never => {
 type TerminalPageActionTrialEvaluation = {
   action: ExposedPageAction;
   result: CrossSectionTrialResult;
-  utility: TerminalCompatUtilityAssessment;
+  layered: TerminalLayeredTrialValue;
   committedCost: number;
   weightedCommittedCost: number;
 };
@@ -305,6 +293,7 @@ type TerminalPageActionTrialInput = {
   transitionBalance: Balance;
   baseCommittedCost: number;
   baseWeightedCommittedCost: number;
+  baseTechniquePurchases: number;
   input: TerminalTechniqueOptionsInput;
   riskProfile: RiskProfile;
   generationProfile: GenerationProfile;
@@ -325,6 +314,7 @@ const evaluateTerminalPageActionTrial = ({
   transitionBalance,
   baseCommittedCost,
   baseWeightedCommittedCost,
+  baseTechniquePurchases,
   input,
   riskProfile,
   generationProfile,
@@ -370,16 +360,23 @@ const evaluateTerminalPageActionTrial = ({
         generationProfile,
       });
       const spend = techniqueSpendMetrics(song.cost, transitionBalance, tokenPressure);
+      const immediate = immediatePracticeRewards(song.practiceBonus);
+      const currentImmediateSkillPoints =
+        baseTechniquePurchases * 5 + 25 + immediate.skillPoints;
+      const currentImmediateStatPoints = immediate.statPoints;
+      const currentStructuralTier = structuralTier(song, input.plan);
       return {
         action,
         result,
-        utility: terminalUtilityFromTrial({
+        layered: terminalLayeredTrialValue({
           tieId: pageActionKey(action),
           concertIndex: input.concertIndex,
           songsThisSection: input.songsThisSection,
           currentSectionPurchases: 1,
+          currentStructuralTier,
+          currentImmediateStatPoints,
+          currentImmediateSkillPoints,
           result,
-          couplingKey: `${baseSeed}:future`,
         }),
         committedCost: baseCommittedCost + spend.totalSpend,
         weightedCommittedCost:
@@ -446,16 +443,33 @@ const evaluateTerminalPageActionTrial = ({
         generationProfile,
       });
       const spend = techniqueSpendMetrics(song.cost, transitionBalance, tokenPressure);
+      const immediate = immediatePracticeRewards(song.practiceBonus);
+      const currentImmediateSkillPoints =
+        baseTechniquePurchases * 5 +
+        25 +
+        immediate.skillPoints +
+        actionTrial.currentSectionPurchases * 25 +
+        actionTrial.currentSectionTechniquePurchases * 5 +
+        actionTrial.currentSectionImmediateSkillPoints;
+      const currentImmediateStatPoints =
+        immediate.statPoints + actionTrial.currentSectionImmediateStatPoints;
+      const currentStructuralTier = Math.max(
+        structuralTier(song, input.plan),
+        actionTrial.currentSectionBestStructuralTier,
+      );
+      const currentSectionPurchases = 1 + actionTrial.currentSectionPurchases;
       return {
         action,
         result,
-        utility: terminalUtilityFromTrial({
+        layered: terminalLayeredTrialValue({
           tieId: pageActionKey(action),
           concertIndex: input.concertIndex,
           songsThisSection: input.songsThisSection,
-          currentSectionPurchases: 1 + actionTrial.currentSectionPurchases,
+          currentSectionPurchases,
+          currentStructuralTier,
+          currentImmediateStatPoints,
+          currentImmediateSkillPoints,
           result,
-          couplingKey: `${baseSeed}:future`,
         }),
         committedCost:
           baseCommittedCost +
@@ -480,16 +494,19 @@ const evaluateTerminalPageActionTrial = ({
         trial,
       );
       if (!actionTrial) return null;
+      const currentImmediateSkillPoints = baseTechniquePurchases * 5;
       return {
         action,
         result: actionTrial.result,
-        utility: terminalUtilityFromTrial({
+        layered: terminalLayeredTrialValue({
           tieId: pageActionKey(action),
           concertIndex: input.concertIndex,
           songsThisSection: input.songsThisSection,
           currentSectionPurchases: 0,
+          currentStructuralTier: 0,
+          currentImmediateStatPoints: 0,
+          currentImmediateSkillPoints,
           result: actionTrial.result,
-          couplingKey: `${baseSeed}:future`,
         }),
         committedCost: baseCommittedCost,
         weightedCommittedCost: baseWeightedCommittedCost,
@@ -553,8 +570,6 @@ export const evaluateTerminalTechniqueOptions = (
   const admissionThreshold = input.concertIndex === 3 ? catastropheFloor : threshold;
   const baseSeed = `${input.seedKey ?? "terminal-technique"}:crn`;
   const stopAggregate = emptyAggregate();
-  const stopUtilityLinear = emptyUtilityLinearAggregate();
-  let stopUtilityTotal = 0;
 
   const candidateKeyById = new Map<string, string>();
   const uniqueCandidates = new Map<string, TerminalTechniqueCandidate>();
@@ -566,20 +581,8 @@ export const evaluateTerminalTechniqueOptions = (
   const pushAggregates = new Map(
     [...uniqueCandidates.keys()].map((key) => [key, emptyAggregate()]),
   );
-  const pushUtilityTotals = new Map(
-    [...uniqueCandidates.keys()].map((key) => [key, 0]),
-  );
-  const pushUtilityLinear = new Map(
-    [...uniqueCandidates.keys()].map((key) => [
-      key,
-      emptyUtilityLinearAggregate(),
-    ]),
-  );
-  const pairedUtilityStats = new Map<string, PairedDifferenceStats>(
-    [...uniqueCandidates.keys()].map((key) => [
-      key,
-      createPairedDifferenceStats(),
-    ]),
+  const layeredPairedStats = new Map<string, LayeredPairedStats>(
+    [...uniqueCandidates.keys()].map((key) => [key, createLayeredPairedStats()]),
   );
 
   const candidateStable = (key: string, samples: number): boolean => {
@@ -592,13 +595,14 @@ export const evaluateTerminalTechniqueOptions = (
       maxWidth: 0.05,
       z: ROBUSTNESS_NORMAL_Z,
     });
-    const paired = pairedUtilityRobustness({
-      stats: pairedUtilityStats.get(key) ?? createPairedDifferenceStats(),
-      minimumSamples,
-      maxSamples: maxTrials,
-      couplingKey: `${baseSeed}:future`,
-    });
-    return reachStable && paired.separation !== "not-separated";
+    const layeredStats = layeredPairedStats.get(key) ?? createLayeredPairedStats();
+    const layeredDecision = decideTerminalLayeredEvidence(
+      layeredEvidenceFromStats(layeredStats),
+    );
+    const layeredStable =
+      layeredDecision.separated ||
+      layeredDecision.reason === "no-material-difference";
+    return reachStable && layeredStable;
   };
 
   let actualTrials = 0;
@@ -620,31 +624,32 @@ export const evaluateTerminalTechniqueOptions = (
       trial,
     );
     const stopResult = stopActionTrial?.result ?? null;
-    const stopUtilityAssessment = stopResult
-      ? terminalUtilityFromTrial({
+    const stopLayered = stopResult
+      ? terminalLayeredTrialValue({
           tieId: "stop-now",
           concertIndex: input.concertIndex,
           songsThisSection: input.songsThisSection,
           currentSectionPurchases: 0,
+          currentStructuralTier: 0,
+          currentImmediateStatPoints: 0,
+          currentImmediateSkillPoints: 0,
           result: stopResult,
-          couplingKey: `${baseSeed}:future`,
         })
       : null;
-    const stopUtility = stopUtilityAssessment?.nominalStatPoints ?? 0;
-    stopUtilityTotal += stopUtility;
-    addUtilityLinearTerms(stopUtilityLinear, stopUtilityAssessment);
     if (stopResult) addTrial(stopAggregate, stopResult);
 
     for (const [actionKey, candidate] of uniqueCandidates) {
       const aggregate = pushAggregates.get(actionKey);
-      const pairedUtility = pairedUtilityStats.get(actionKey);
-      if (!aggregate || !pairedUtility) continue;
+      const layeredStats = layeredPairedStats.get(actionKey);
+      if (!aggregate || !layeredStats || !stopLayered || !stopResult) continue;
 
       let bestEvaluation: TerminalPageActionTrialEvaluation | null = null;
       let candidateCommittedCost = 0;
       let candidateWeightedCommittedCost = 0;
+      let attemptedTechniquePurchases = 0;
+      const candidateAffordable = canAfford(input.tokens, candidate.cost);
 
-      if (canAfford(input.tokens, candidate.cost)) {
+      if (candidateAffordable) {
         const candidateSpend = techniqueSpendMetrics(
           candidate.cost,
           input.tokens,
@@ -671,6 +676,7 @@ export const evaluateTerminalTechniqueOptions = (
         candidateCommittedCost = candidateSpend.totalSpend + transition.spent;
         candidateWeightedCommittedCost =
           candidateSpend.weightedDemandCost + transition.spent;
+        attemptedTechniquePurchases = 1 + transition.purchases;
 
         if (transition.reached) {
           const page = drawTransitionSongPage(
@@ -691,6 +697,7 @@ export const evaluateTerminalTechniqueOptions = (
               transitionBalance: transition.balance,
               baseCommittedCost: candidateCommittedCost,
               baseWeightedCommittedCost: candidateWeightedCommittedCost,
+              baseTechniquePurchases: 1 + transition.purchases,
               input,
               riskProfile,
               generationProfile,
@@ -702,9 +709,9 @@ export const evaluateTerminalTechniqueOptions = (
             if (!evaluation) continue;
             if (
               !bestEvaluation ||
-              compareTerminalCompatUtilityAssessments(
-                evaluation.utility,
-                bestEvaluation.utility,
+              compareTerminalLayeredTrialValues(
+                evaluation.layered,
+                bestEvaluation.layered,
               ) > 0
             ) {
               bestEvaluation = evaluation;
@@ -713,16 +720,24 @@ export const evaluateTerminalTechniqueOptions = (
         }
       }
 
-      const pushUtility = bestEvaluation?.utility.nominalStatPoints ?? 0;
-      pushUtilityTotals.set(
-        actionKey,
-        (pushUtilityTotals.get(actionKey) ?? 0) + pushUtility,
-      );
-      const linearAggregate = pushUtilityLinear.get(actionKey);
-      if (linearAggregate) {
-        addUtilityLinearTerms(linearAggregate, bestEvaluation?.utility ?? null);
-      }
-      addPairedDifference(pairedUtility, pushUtility - stopUtility);
+      // A miss is not a zeroed world. Existing gates remain secured and any
+      // Techniques physically bought before the miss keep their immediate
+      // reward. Reuse STOP's downstream projection only to keep unchanged T2
+      // context neutral; no structural acquisition is invented on the miss.
+      const attemptedLayered = bestEvaluation?.layered ??
+        terminalLayeredTrialValue({
+          tieId: `${actionKey}:no-page`,
+          concertIndex: input.concertIndex,
+          songsThisSection: input.songsThisSection,
+          currentSectionPurchases: 0,
+          currentStructuralTier: 0,
+          currentImmediateStatPoints: 0,
+          currentImmediateSkillPoints: candidateAffordable
+            ? attemptedTechniquePurchases * 5
+            : 0,
+          result: stopResult,
+        });
+      addLayeredPairedDifference(layeredStats, attemptedLayered, stopLayered);
 
       aggregate.committedCost +=
         bestEvaluation?.committedCost ?? candidateCommittedCost;
@@ -749,16 +764,20 @@ export const evaluateTerminalTechniqueOptions = (
 
   const trials = Math.max(1, actualTrials);
   const stop = normalized(stopAggregate, trials);
-  const stopUtilityStatPoints = stopUtilityTotal / trials;
 
   return input.candidates.map((candidate) => {
     const actionKey =
       candidateKeyById.get(candidate.id) ?? canonicalTechniqueActionKey(candidate.cost);
     const aggregate = pushAggregates.get(actionKey) ?? emptyAggregate();
     const push = normalized(aggregate, trials);
-    const pushUtilityStatPoints = (pushUtilityTotals.get(actionKey) ?? 0) / trials;
-    const paired =
-      pairedUtilityStats.get(actionKey) ?? createPairedDifferenceStats();
+    const layeredStats =
+      layeredPairedStats.get(actionKey) ?? createLayeredPairedStats();
+    const layeredEvidence = layeredEvidenceFromStats(layeredStats);
+    const layeredDecision = decideTerminalLayeredEvidence(layeredEvidence);
+    const decisiveMetric = layeredDecision.metric ?? "mechanical-reward";
+    const decisiveEvidence =
+      layeredEvidence.find((item) => item.metric === decisiveMetric) ??
+      layeredEvidence[0]!;
     const reachInterval = wilsonInterval(
       aggregate.completions,
       trials,
@@ -769,95 +788,84 @@ export const evaluateTerminalTechniqueOptions = (
     const riskClearlyBelow = reachInterval[1] < admissionThreshold;
     const riskNotSeparated = !safetyAdmissible && !riskClearlyBelow;
     const pairedRobustness = pairedUtilityRobustness({
-      stats: paired,
+      stats: layeredStats[decisiveMetric],
       minimumSamples,
       maxSamples: maxTrials,
-      couplingKey: `${baseSeed}:future`,
+      couplingKey: `${baseSeed}:future:${decisiveMetric}`,
       timeBudgetExceeded,
       riskSeparated: !riskNotSeparated,
     });
-    const utilityDeltaInterval = pairedRobustness.interval;
-    const utilityDeltaStatPoints = pairedRobustness.mean;
-    const pushLinearTerms = normalizedUtilityLinearTerms(
-      pushUtilityLinear.get(actionKey) ?? emptyUtilityLinearAggregate(),
-      trials,
-    );
-    const stopLinearTerms = normalizedUtilityLinearTerms(
-      stopUtilityLinear,
-      trials,
-    );
-    const calibrationBreakpoints =
-      riskClearlyBelow
-        ? []
-        : terminalCompatBreakpointsFromLinearTerms({
-            leftId: "expose-and-carry",
-            rightId: "stop-now",
-            left: pushLinearTerms,
-            right: stopLinearTerms,
-          });
-    const calibrationIsSensitive = calibrationSensitive(calibrationBreakpoints);
-    const monteCarloNotSeparated =
-      riskNotSeparated || pairedRobustness.separation === "not-separated";
-    const coReason = coRecommendationReason({
-      monteCarloNotSeparated,
-      calibrationSensitive: calibrationIsSensitive,
-    });
-    // Co-recommended actions are deliberately not called equivalent. A true
-    // Monte-Carlo not-separation uses the versioned STOP-first stable primary
-    // because another seed/sample can reverse the sample mean. Calibration
-    // sensitivity is systematic instead: under the nominal fixed policy the
-    // primary stays the nominal utility winner while the alternative remains
-    // explicitly co-recommended.
-    const nominalShouldPush = safetyAdmissible && utilityDeltaStatPoints > 0;
-    const robustPrimary = monteCarloNotSeparated
-      ? stableCoRecommendationPrimary(
-          ["stop-now", "expose-and-carry"] as const,
-          ["stop-now", "expose-and-carry"] as const,
-        )
-      : null;
-    const shouldPush = monteCarloNotSeparated
-      ? robustPrimary === "expose-and-carry"
-      : nominalShouldPush;
+    const layeredNotSeparated =
+      !layeredDecision.separated || riskNotSeparated;
+    // Below the gate/structural layers, PUSH has a real resource trade-off:
+    // it spends tokens that STOP preserves. We deliberately do not invent a
+    // token-to-stat exchange rate to let immediate/T2 rewards settle that
+    // trade-off. Keep STOP as the stable primary and surface PUSH as a genuine
+    // alternative instead.
+    const resourceTradeoff =
+      layeredDecision.separated &&
+      layeredDecision.action === "expose-and-carry" &&
+      (layeredDecision.layer === "mechanical" || layeredDecision.layer === "t2") &&
+      push.expectedCommittedCost > 0;
+    const coReason =
+      !riskClearlyBelow && resourceTradeoff
+        ? ("resource-tradeoff" as const)
+        : !riskClearlyBelow && layeredNotSeparated
+          ? ("monte-carlo-not-separated" as const)
+          : null;
+    const shouldPush =
+      safetyAdmissible &&
+      !coReason &&
+      layeredDecision.action === "expose-and-carry";
     const reason: Message =
-      monteCarloNotSeparated
+      input.concertIndex === 3 && riskClearlyBelow
         ? {
-            code: "terminal.stopNowNotSeparated",
-            coRecommendationReason: coReason ?? "monte-carlo-not-separated",
+            code: "terminal.stopNowCatastropheFloorLayered",
+            reachLowerBound,
+            catastropheFloor,
           }
-        : input.concertIndex === 3 && reachLowerBound < catastropheFloor
+        : coReason
           ? {
-              code: "terminal.stopNowCatastropheFloor",
-              grossValue: pushUtilityStatPoints,
-              opportunityCost: stopUtilityStatPoints,
-              riskPenalty: 0,
-              netValue: utilityDeltaStatPoints,
-              reachLowerBound,
-              catastropheFloor,
+              code: "terminal.stopNowNotSeparated",
+              coRecommendationReason: coReason,
             }
           : !safetyAdmissible
             ? { code: "terminal.stopNowPageNotReached" }
             : shouldPush
-            ? {
-                code: "terminal.exposeAndCarryValue",
-                grossValue: pushUtilityStatPoints,
-                opportunityCost: stopUtilityStatPoints,
-                riskPenalty: 0,
-                netValue: utilityDeltaStatPoints,
-                reachLowerBound,
-                catastropheFloor,
-              }
-            : {
-                code: "terminal.stopNowValue",
-                grossValue: pushUtilityStatPoints,
-                opportunityCost: stopUtilityStatPoints,
-                riskPenalty: 0,
-                netValue: utilityDeltaStatPoints,
-                reachLowerBound,
-                catastropheFloor,
-              };
+              ? {
+                  code: "terminal.exposeAndCarryLayered",
+                  layer: layeredDecision.layer === "none" ? "t2" : layeredDecision.layer,
+                  metric: decisiveMetric,
+                  delta: decisiveEvidence.mean,
+                  reachLowerBound,
+                  catastropheFloor,
+                }
+              : {
+                  code: "terminal.stopNowLayered",
+                  layer: layeredDecision.layer === "none" ? "t2" : layeredDecision.layer,
+                  metric: decisiveMetric,
+                  delta: decisiveEvidence.mean,
+                  reachLowerBound,
+                  catastropheFloor,
+                };
     const converged = candidateStable(actionKey, trials);
     const uncertainAtBudgetLimit =
       !converged && (trials >= maxTrials || timeBudgetExceeded);
+    const decisionLayer = !safetyAdmissible
+      ? ("risk" as const)
+      : layeredDecision.layer;
+    const decisionMetric = !safetyAdmissible
+      ? "reach-admission"
+      : layeredDecision.metric;
+    const decisionDelta = !safetyAdmissible
+      ? reachLowerBound - admissionThreshold
+      : decisiveEvidence.mean;
+    const decisionInterval = !safetyAdmissible
+      ? ([
+          reachInterval[0] - admissionThreshold,
+          reachInterval[1] - admissionThreshold,
+        ] as const)
+      : decisiveEvidence.interval;
 
     return {
       candidateId: candidate.id,
@@ -872,12 +880,12 @@ export const evaluateTerminalTechniqueOptions = (
         ? ([shouldPush ? "stop-now" : "expose-and-carry"] as const)
         : ([] as const),
       coRecommendationReason: coReason,
-      calibrationSensitiveParameters: calibrationBreakpoints.map(
-        (breakpoint) => breakpoint.parameter,
-      ),
-      calibrationBreakpoints: calibrationBreakpoints.map((breakpoint) => ({
-        ...breakpoint,
-      })),
+      calibrationSensitiveParameters: [],
+      calibrationBreakpoints: [],
+      decisionLayer,
+      decisionMetric,
+      decisionDelta,
+      decisionInterval,
       pairedUtility: pairedRobustness,
       timeBudgetExceeded,
       seedKey: baseSeed,
@@ -885,15 +893,15 @@ export const evaluateTerminalTechniqueOptions = (
       reachProbability: push.completionProbability,
       expectedCommittedCost: push.expectedCommittedCost,
       expectedWeightedCommittedCost: push.expectedWeightedCommittedCost,
-      expectedOpportunityCost: stopUtilityStatPoints,
+      expectedOpportunityCost: 0,
       riskThreshold: threshold,
       catastropheFloor,
       admissionThreshold,
       reachConfidenceInterval: [reachInterval[0], reachInterval[1]] as const,
       reachConfidenceLowerBound: reachLowerBound,
-      grossValue: pushUtilityStatPoints,
+      grossValue: 0,
       riskPenalty: 0,
-      netValue: utilityDeltaStatPoints,
+      netValue: 0,
       stopCheckpointProbability: stop.checkpointProbability,
       pushCheckpointProbability: push.checkpointProbability,
       stopTargetProbability: stop.targetProbability,
@@ -918,20 +926,26 @@ export const evaluateTerminalTechniqueOptions = (
         push.expectedPracticeTrainingExposure,
       stopExpectedStructuralPurchases: stop.expectedStructuralPurchases,
       pushExpectedStructuralPurchases: push.expectedStructuralPurchases,
-      decisionVector: [
-        shouldPush ? 1 : 0,
-        safetyAdmissible ? 2 : push.completionProbability > 0 ? 1 : 0,
-        utilityDeltaStatPoints > 0 ? 1 : 0,
-        pushUtilityStatPoints,
-        utilityDeltaStatPoints,
-        utilityDeltaInterval[0],
-        utilityDeltaInterval[1],
-        push.completionProbability,
-        push.targetProbability,
-        push.expectedFriendshipTrainingExposure,
-        push.expectedSpTrainingExposure,
-        push.expectedPracticeTrainingExposure,
-      ],
+      // Terminal technique ranking consumes the same layered contract as the
+      // PUSH-vs-STOP decision. No compatibility scalar, gate-18 projection or
+      // Friendship-exposure conversion is allowed back in through this vector.
+      decisionVector: terminalTechniqueDecisionVector({
+        pushRecommended: shouldPush,
+        riskState: safetyAdmissible ? 2 : riskNotSeparated ? 1 : 0,
+        layeredState: layeredDecision.separated
+          ? layeredDecision.action === "expose-and-carry" && !resourceTradeoff
+            ? 2
+            : layeredDecision.action === "stop-now"
+              ? 0
+              : 1
+          : 1,
+        metricMeans: Object.fromEntries(
+          TERMINAL_LAYERED_METRIC_ORDER.map((metric) => [
+            metric,
+            layeredStats[metric].mean,
+          ]),
+        ) as Record<TerminalLayeredMetricId, number>,
+      }),
     };
   });
 };

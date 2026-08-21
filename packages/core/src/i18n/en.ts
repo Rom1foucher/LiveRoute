@@ -8,6 +8,27 @@ const fixed0 = (value: number): string => (value * 100).toFixed(0);
 const tenth = (value: number): string => String(Math.round(value * 10) / 10);
 const whole = (value: number): string => String(Math.round(value));
 
+const terminalLayerEn = (layer: "gate" | "structural" | "mechanical" | "t2"): string =>
+  layer === "gate"
+    ? "Concert objective"
+    : layer === "structural"
+      ? "structural target"
+      : layer === "mechanical"
+        ? "immediate reward"
+        : "secondary bonus";
+
+const terminalMetricEn = (metric: string): string => {
+  if (metric === "great-success-secured") return "Great Success";
+  if (metric === "structural-tier-5") return "priority SP target";
+  if (metric === "structural-tier-4") return "Friendship +10 / strong target";
+  if (metric === "structural-tier-3") return "Friendship +5";
+  if (metric === "structural-tier-2") return "secondary structural target";
+  if (metric === "mechanical-reward") return "immediate stats/SP";
+  if (metric === "t2-practice") return "training bonus";
+  if (metric === "t2-skill-points") return "training SP bonus";
+  return metric;
+};
+
 const planLabelEn = (planId: PlanId, mode: PlanMode): string => {
   switch (planId) {
     case "convert-final":
@@ -273,16 +294,28 @@ export const renderEn = (message: Message): string => {
       return `EXPOSE_AND_CARRY justified: ${renderEn(message.gain)}`;
     case "terminal.stopNowPageNotReached":
       return "STOP_NOW: the carried Shop is not reached reliably enough";
+    case "terminal.coRecommendedAlternative":
+      return message.action === "expose-and-carry"
+        ? "Defensible alternative: PUSH"
+        : "Defensible alternative: STOP";
     case "terminal.stopNowNotSeparated":
-      return message.coRecommendationReason === "both"
-        ? "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo is not separated and calibration can also reverse the order"
-        : "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo has not separated the actions";
+      return message.coRecommendationReason === "resource-tradeoff"
+        ? "STOP_NOW remains the primary; PUSH is also defensible: the immediate gain is real, but the model does not invent an exchange rate against the resources spent"
+        : message.coRecommendationReason === "both"
+          ? "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo is not separated and calibration can also reverse the order"
+          : "STOP_NOW is the stable primary; EXPOSE_AND_CARRY is co-recommended because paired Monte Carlo has not separated the actions";
     case "terminal.stopNow":
       return `STOP_NOW: ${renderEn(message.gain)}`;
+    case "terminal.exposeAndCarryLayered":
+      return `PUSH · ${terminalLayerEn(message.layer)} advantage (${terminalMetricEn(message.metric)}) ${message.delta >= 0 ? "+" : ""}${tenth(message.delta)} · safety ${pct1(message.reachLowerBound)} % (floor ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowLayered":
+      return `STOP · PUSH delta on ${terminalLayerEn(message.layer)} (${terminalMetricEn(message.metric)}) ${message.delta >= 0 ? "+" : ""}${tenth(message.delta)} · safety ${pct1(message.reachLowerBound)} % (floor ${pct1(message.catastropheFloor)} %)`;
     case "terminal.exposeAndCarryValue":
       return `EXPOSE_AND_CARRY · value ${tenth(message.grossValue)} - opportunity cost ${tenth(message.opportunityCost)} - risk ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · reach lower bound ${pct1(message.reachLowerBound)} % (floor ${pct1(message.catastropheFloor)} %)`;
     case "terminal.stopNowValue":
       return `STOP_NOW · value ${tenth(message.grossValue)} - opportunity cost ${tenth(message.opportunityCost)} - risk ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · reach lower bound ${pct1(message.reachLowerBound)} % (floor ${pct1(message.catastropheFloor)} %)`;
+    case "terminal.stopNowCatastropheFloorLayered":
+      return `STOP_NOW · reach lower bound ${pct1(message.reachLowerBound)} % is below the catastrophe floor ${pct1(message.catastropheFloor)} %`;
     case "terminal.stopNowCatastropheFloor":
       return `STOP_NOW · value ${tenth(message.grossValue)} - opportunity cost ${tenth(message.opportunityCost)} - risk ${tenth(message.riskPenalty)} = net ${tenth(message.netValue)} · reach lower bound ${pct1(message.reachLowerBound)} % is below the catastrophe floor ${pct1(message.catastropheFloor)} %`;
 

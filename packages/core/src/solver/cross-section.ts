@@ -6,6 +6,7 @@ import {
   createTechniqueSimulationMemo,
   effectExposure,
   estimateRemainingTrainingsByFacility,
+  immediatePracticeRewards,
   subtractCost,
   totalCost,
   type AcquiredEffect,
@@ -113,6 +114,8 @@ export type CrossSectionTrialResult = {
   purchases: number;
   techniquePurchases: number;
   lessonSkillPoints: number;
+  immediateStatPoints: number;
+  immediateSkillPoints: number;
   totalSongs: number;
   retainedBalance: Balance;
   remainingPool: SongTarget[];
@@ -131,6 +134,9 @@ export type CrossSectionActionTrialResult = {
   currentSectionTechniquePurchases: number;
   /** Raw token spend of the optional pre-Live continuation. */
   currentSectionCommittedCost: number;
+  currentSectionImmediateStatPoints: number;
+  currentSectionImmediateSkillPoints: number;
+  currentSectionBestStructuralTier: number;
 };
 
 export type CrossSectionActionTrialInput = Omit<
@@ -160,6 +166,8 @@ export type CrossSectionReadinessResult = {
   expectedPurchases: number;
   expectedTechniquePurchases: number;
   expectedLessonSkillPoints: number;
+  expectedImmediateStatPoints: number;
+  expectedImmediateSkillPoints: number;
   expectedRetainedTokens: number;
   expectedRetainedBalance: Balance;
   currentSectionCompletionProbability: number;
@@ -258,6 +266,8 @@ export const simulateCrossSectionReadinessTrial = (
   let carriedFriendshipPurchases = 0;
   let carriedFriendship10 = false;
   let carriedEffects: AcquiredEffect[] = [];
+  let carriedImmediateStatPoints = 0;
+  let carriedImmediateSkillPoints = 0;
   let carriedStructuralPurchases = 0;
   let carriedTargetAcquired = false;
   let nextBalance = applyPromotionalLiveTransition(
@@ -332,6 +342,9 @@ export const simulateCrossSectionReadinessTrial = (
           : 0;
       carriedFriendshipPurchases = carriedFriendshipBonus > 0 ? 1 : 0;
       carriedFriendship10 = carriedFriendshipBonus >= 10;
+      const carriedImmediate = immediatePracticeRewards(selected.practiceBonus);
+      carriedImmediateStatPoints = carriedImmediate.statPoints;
+      carriedImmediateSkillPoints = carriedImmediate.skillPoints;
       carriedEffects = acquiredEffectsForSong({
         song: selected,
         concertIndex: nextConcertIndex,
@@ -379,6 +392,8 @@ export const simulateCrossSectionReadinessTrial = (
       purchases: 0,
       techniquePurchases: 0,
       lessonSkillPoints: 0,
+      immediateStatPoints: 0,
+      immediateSkillPoints: 0,
       totalSongs: nextTotalSongs,
       retainedBalance: nextBalance,
       remainingPool: nextPool,
@@ -442,6 +457,10 @@ export const simulateCrossSectionReadinessTrial = (
     lessonSkillPoints:
       (nextResult.purchases + carriedPagePurchases) * 25 +
       nextResult.techniquePurchases * 5,
+    immediateStatPoints:
+      carriedImmediateStatPoints + nextResult.immediateStatPoints,
+    immediateSkillPoints:
+      carriedImmediateSkillPoints + nextResult.immediateSkillPoints,
     totalSongs: nextTotalSongs + nextResult.purchases,
     retainedBalance: nextResult.retainedBalance,
     remainingPool: nextResult.remainingPool,
@@ -565,6 +584,9 @@ export const simulateCrossSectionActionTrial = (
     currentSectionPurchases: currentResult?.purchases ?? 0,
     currentSectionTechniquePurchases: currentResult?.techniquePurchases ?? 0,
     currentSectionCommittedCost: currentResult?.committedCost ?? 0,
+    currentSectionImmediateStatPoints: currentResult?.immediateStatPoints ?? 0,
+    currentSectionImmediateSkillPoints: currentResult?.immediateSkillPoints ?? 0,
+    currentSectionBestStructuralTier: currentResult?.bestStructuralTier ?? 0,
     result: {
       ...nextResult,
       checkpointMet: immediateResult.checkpointMet && nextResult.checkpointMet,
@@ -589,6 +611,14 @@ export const simulateCrossSectionActionTrial = (
       purchases: chainedPurchases,
       techniquePurchases: chainedTechniquePurchases,
       lessonSkillPoints: chainedLessonSkillPoints,
+      immediateStatPoints:
+        (currentResult?.immediateStatPoints ?? 0) +
+        immediateResult.immediateStatPoints +
+        (laterResult?.immediateStatPoints ?? 0),
+      immediateSkillPoints:
+        (currentResult?.immediateSkillPoints ?? 0) +
+        immediateResult.immediateSkillPoints +
+        (laterResult?.immediateSkillPoints ?? 0),
     },
   };
 };
@@ -624,6 +654,8 @@ export const evaluateCrossSectionReadiness = (
   let purchaseTotal = 0;
   let techniquePurchaseTotal = 0;
   let lessonSkillPointTotal = 0;
+  let immediateStatPointTotal = 0;
+  let immediateSkillPointTotal = 0;
   let retainedTokenTotal = 0;
   const retainedBalanceTotal = zeroBalance();
   let representativePlanId: StrategicPlan["id"] | null = null;
@@ -670,6 +702,8 @@ export const evaluateCrossSectionReadiness = (
     purchaseTotal += result.purchases;
     techniquePurchaseTotal += result.techniquePurchases;
     lessonSkillPointTotal += result.lessonSkillPoints;
+    immediateStatPointTotal += result.immediateStatPoints;
+    immediateSkillPointTotal += result.immediateSkillPoints;
     retainedTokenTotal += totalCost(result.retainedBalance);
     for (const key of TOKEN_KEYS) {
       retainedBalanceTotal[key] += result.retainedBalance[key];
@@ -692,6 +726,8 @@ export const evaluateCrossSectionReadiness = (
   const expectedPurchases = purchaseTotal / denominator;
   const expectedTechniquePurchases = techniquePurchaseTotal / denominator;
   const expectedLessonSkillPoints = lessonSkillPointTotal / denominator;
+  const expectedImmediateStatPoints = immediateStatPointTotal / denominator;
+  const expectedImmediateSkillPoints = immediateSkillPointTotal / denominator;
   const expectedRetainedTokens = retainedTokenTotal / denominator;
   const expectedRetainedBalance = Object.fromEntries(
     TOKEN_KEYS.map((key) => [key, retainedBalanceTotal[key] / denominator]),
@@ -730,6 +766,8 @@ export const evaluateCrossSectionReadiness = (
     expectedPurchases,
     expectedTechniquePurchases,
     expectedLessonSkillPoints,
+    expectedImmediateStatPoints,
+    expectedImmediateSkillPoints,
     expectedRetainedTokens,
     expectedRetainedBalance,
     currentSectionCompletionProbability,

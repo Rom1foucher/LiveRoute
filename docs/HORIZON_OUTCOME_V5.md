@@ -157,14 +157,16 @@ Persistent HUNT is abandoned automatically only when the target has no modeled
 appearance probability left (or the state was already closed). `pagesSeenWithoutTarget`,
 filler count, committed spend and cycle depth do not change that admission.
 
-## Terminal compatibility boundary
+## Terminal layered boundary
 
-P5/P4 terminal ranking is intentionally isolated in
-`terminal-compat-utility.ts`. It temporarily preserves the deployed v1.0.2/v6
-terminal scalar, including the historical Friendship conversion, so P3b2 cannot
-silently rewrite validated C4/Grand-Live decisions as a side effect. New song
-policy code must not import that compatibility module. Its removal is a separate
-replay-gated migration.
+The replay-gated terminal migration is complete. `terminal-compat-utility.ts`
+has been removed and P5/P4 no longer owns a scalar conversion of Friendship
+exposure or zero-income gate-18 reach. Terminal trials retain the same physical
+`HorizonOutcome`/cross-section evidence but compare it in native layers:
+Great Success, structural tiers, deterministic reward, then generic T2.
+
+Zero-income checkpoint probabilities remain available as diagnostics/robustness
+evidence only. They are not fractions of a deterministic gate reward.
 
 ## Carried-page song selection
 

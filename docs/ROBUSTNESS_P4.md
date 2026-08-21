@@ -191,8 +191,8 @@ P4 carries three distinct acceptance cases.
 
 ### Monte-Carlo only
 
-A real C3 fixture at 80 draws has a paired utility interval crossing zero. The
-sample mean is not used to force a winner:
+A real C3 fixture at 80 draws has a paired decisive-metric interval crossing
+zero. The sample mean is not used to force a winner:
 
 ```text
 recommended = STOP_NOW

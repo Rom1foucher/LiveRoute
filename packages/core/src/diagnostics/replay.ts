@@ -222,6 +222,10 @@ type TerminalDecisionSnapshot = {
     TerminalTechniqueDecisionSummary["coRecommendationReason"];
   calibrationSensitiveParameters: readonly string[];
   calibrationBreakpoints: TerminalTechniqueDecisionSummary["calibrationBreakpoints"];
+  decisionLayer: TerminalTechniqueDecisionSummary["decisionLayer"];
+  decisionMetric: TerminalTechniqueDecisionSummary["decisionMetric"];
+  decisionDelta: number;
+  decisionInterval: readonly [number, number];
   pairedUtility: TerminalTechniqueDecisionSummary["pairedUtility"];
   timeBudgetExceeded: boolean;
   reachProbability: number;
@@ -404,6 +408,10 @@ const terminalSnapshot = (
   calibrationBreakpoints: result.calibrationBreakpoints.map((breakpoint) => ({
     ...breakpoint,
   })),
+  decisionLayer: result.decisionLayer,
+  decisionMetric: result.decisionMetric,
+  decisionDelta: result.decisionDelta,
+  decisionInterval: [...result.decisionInterval] as readonly [number, number],
   pairedUtility: {
     ...result.pairedUtility,
     interval: [...result.pairedUtility.interval] as readonly [number, number],

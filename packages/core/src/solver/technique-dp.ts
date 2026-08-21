@@ -1,6 +1,7 @@
 import {
   techniqueSpendMetrics,
   type Balance,
+  type TerminalTechniqueDecisionVector,
   type TokenPressure,
 } from "../live-model.ts";
 import {
@@ -19,7 +20,7 @@ export type TechniqueDecisionCandidate<T = unknown> = {
   cost: Balance;
   reachProbability: number;
   goalProbability: number;
-  terminalDecisionVector?: readonly number[];
+  terminalDecisionVector?: TerminalTechniqueDecisionVector;
   payload: T;
 };
 
@@ -59,7 +60,8 @@ type TechniqueRankSnapshot = {
   goalProbabilityBand: number;
   reachProbabilityBand: number;
   postPurchaseMargins: readonly number[];
-  terminalEconomyBands: readonly number[];
+  terminalMechanicalBand: number;
+  terminalGenericProjectionBands: readonly number[];
   retainedTokensAfterPurchase: number;
   costKey: string;
 };
@@ -112,11 +114,14 @@ const buildTechniqueRankSnapshot = <T>({
     ],
     reserveBreach: -spend.reserveBreachCount,
     reserveDeficit: -spend.reserveDeficit,
+    // P-T4 terminal vector: cumulative structural-tier deltas, all expressed
+    // as paired probabilities. Five-point bands match the structural MC
+    // materiality threshold and avoid ranking on sampling noise.
     terminalStructuralBands: [
-      quantized(terminal?.[4] ?? 0, 0.1),
-      quantized(terminal?.[5] ?? 0, 2.5),
-      quantized(terminal?.[6] ?? 0, 0.1),
-      quantized(terminal?.[7] ?? 0, 0.25),
+      quantized(terminal?.[4] ?? 0, 0.05),
+      quantized(terminal?.[5] ?? 0, 0.05),
+      quantized(terminal?.[6] ?? 0, 0.05),
+      quantized(terminal?.[7] ?? 0, 0.05),
     ],
     pageCoverage: [
       quantized(coverage.planTargetProbability, 0.1),
@@ -139,9 +144,12 @@ const buildTechniqueRankSnapshot = <T>({
       spend.minimumPostPurchaseMargin,
       spend.retainedPostPurchaseMargin,
     ],
-    terminalEconomyBands: [
-      quantized(terminal?.[8] ?? 0, 5),
-      quantized(terminal?.[9] ?? 0, 5),
+    // Deterministic reward remains distinct from the generic T2 projections so
+    // diagnostics cannot relabel a behavioural tie-break as terminal economy.
+    terminalMechanicalBand: quantized(terminal?.[8] ?? 0, 0.5),
+    terminalGenericProjectionBands: [
+      quantized(terminal?.[9] ?? 0, 0.5),
+      quantized(terminal?.[10] ?? 0, 0.5),
     ],
     retainedTokensAfterPurchase: affordable ? totalBalance(after) : -Infinity,
     costKey: costKey(candidate.cost),
@@ -254,7 +262,8 @@ export type TechniqueRankReason =
   | "total-cost"
   | "reserve-drain"
   | "post-purchase-margin"
-  | "terminal-economy"
+  | "terminal-mechanical"
+  | "terminal-generic-projection"
   | "continuation-fallback"
   | "stable-id";
 
@@ -324,10 +333,14 @@ const compareTechniqueRankSnapshots = (
       compareDescending(left.reachProbabilityBand, right.reachProbabilityBand),
     ],
     [
-      "terminal-economy",
+      "terminal-mechanical",
+      compareDescending(left.terminalMechanicalBand, right.terminalMechanicalBand),
+    ],
+    [
+      "terminal-generic-projection",
       compareDescendingVector(
-        left.terminalEconomyBands,
-        right.terminalEconomyBands,
+        left.terminalGenericProjectionBands,
+        right.terminalGenericProjectionBands,
       ),
     ],
     [

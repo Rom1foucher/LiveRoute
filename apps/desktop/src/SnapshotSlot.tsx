@@ -294,6 +294,12 @@ const buildDecision = (
                     ? ("warning" as const)
                     : ("positive" as const),
               },
+              ...techniqueResult.terminalDecision.coRecommended.map((action) => ({
+                label: language === "fr" ? "Alternative" : "Alternative",
+                value: action === "stop-now" ? "STOP_NOW" : "EXPOSE_AND_CARRY",
+                detail: t({ code: "terminal.coRecommendedAlternative", action }),
+                tone: "warning" as const,
+              })),
             ]
           : forcedTechnique
             ? [

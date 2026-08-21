@@ -45,6 +45,18 @@ test("P5 source contract removes the separate C4 economy", () => {
   assert.equal(/Math\.max\(0,\s*\w*delta/i.test(source), false);
 });
 
+
+test("P-T4 source contract removes the terminal compatibility scalar", () => {
+  const terminalSource = readFileSync(
+    new URL("../src/solver/terminal-technique.ts", import.meta.url),
+    "utf8",
+  );
+  assert.equal(terminalSource.includes("terminal-compat-utility"), false);
+  assert.equal(terminalSource.includes("FRIENDSHIP_EXPOSURE_STAT_RATE"), false);
+  assert.equal(terminalSource.includes("GATE18_STAT_DELTA"), false);
+  assert.equal(terminalSource.includes("terminalUtilityFromTrial"), false);
+});
+
 test("P5 terminal page action switch is exhaustive and includes BUY_CONTINUE", () => {
   const source = readFileSync(
     new URL("../src/solver/terminal-technique.ts", import.meta.url),
@@ -107,10 +119,11 @@ test("P5 BUY_CONTINUE contributes the second manual song instead of falling thro
   assert.ok(assessments);
   const assessment = assessments[0];
   assert.ok(assessment);
-  // One BUY_STOP cannot secure C1 Great Success from 0/2. The observed utility
-  // includes the second current-section purchase, proving BUY_CONTINUE was
-  // evaluated rather than skipped by the terminal loop.
+  // One BUY_STOP cannot secure C1 Great Success from 0/2. The layered outcome
+  // reaches the discrete gate only through BUY_CONTINUE, proving that branch
+  // was evaluated rather than skipped by the terminal loop.
   assert.equal(assessment.action, "expose-and-carry");
-  assert.ok(assessment.grossValue > 60);
-  assert.ok(assessment.netValue > 0);
+  assert.equal(assessment.decisionLayer, "gate");
+  assert.equal(assessment.decisionMetric, "great-success-secured");
+  assert.equal(assessment.decisionDelta, 1);
 });

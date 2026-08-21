@@ -128,29 +128,33 @@ from silently reopening spending.
 
 ### C4: accumulate toward valuable final state
 
-C4 continues to value relevant Friendship targets, current lesson quality,
-pool thinning, and the exact Grand Live continuation. The displayed 16-song
-checkpoint is pacing telemetry rather than a hard purchase gate.
+C4 continues to value relevant structural targets, current lesson quality, pool
+thinning and the exact Grand Live continuation. The 16-song and 18-song counters
+are progress/deadline telemetry, not an economy. In particular, a higher
+zero-income probability of reaching 18 never gives STOP a proportional reward.
 
-The terminal comparison uses activation-aware Friendship/SP/practice exposure,
-terminal conversion, **marginal opportunity cost**, and a profile risk penalty.
-Raw PR-5 token spend remains telemetry and a ranking tie-breaker; it is not
-subtracted as intrinsic value loss while C4 Friendship remains to be converted.
+Terminal PUSH/STOP uses paired evidence in native layers:
 
-Every C4 trial now uses the same opportunity-cost basis: the value of future C4
-Friendship combinations that become jointly unfundable plus any currently
-fundable purchase capacity lost on the route to 18 songs. A miss/carry that
-destroys no option therefore no longer falls back to the full raw token spend.
-It still pays a small fixed failed-search penalty, while fillers and actual
-option destruction remain costly. This prevents 15-20 % miss branches from
-dominating the expected cost merely because a large but harmless token pile was
-spent. A candidate below the nominal 92 % Standard threshold can therefore
-still win when its net value is materially positive, provided the Wilson lower
-bound stays above the catastrophe floor.
+```text
+physical/risk admission
+-> Great Success
+-> structural target tiers
+-> deterministic immediate stat/SP reward
+-> generic practice/SP projection (T2)
+-> stable tie-break
+```
 
-The solver may stop below 16 when spending now does not improve the prospective
-state, or continue above it for a valuable target. A filler is not promoted
-solely because it moves the counter toward 18.
+Friendship is represented structurally; it is never converted through a
+Friendship-exposure-to-stat rate. Token spend has no intrinsic negative utility.
+When PUSH offers a real mechanical/T2 gain but the opposing resource preservation
+cannot be converted honestly into the same unit, STOP remains the nominal action
+and PUSH is exposed as a co-recommendation (`resource-tradeoff`).
+
+C4 retains one hard safety policy: a Wilson lower bound below the catastrophe
+floor (`max(65%, profile threshold - 20 points)`) blocks PUSH. Above that floor,
+no generic 92 % Standard cliff is reapplied. The solver may stop below 16 or 18,
+or continue above them, whenever the layered evidence says so; a filler is never
+promoted solely to advance either counter.
 
 ### Grand Live: terminal conversion
 
@@ -190,15 +194,12 @@ Friendship remains structurally dominant through `structuralTier`, without
 `FRIENDSHIP_EXPOSURE_STAT_RATE`. Retained tokens and committed token cost remain
 mechanical state, not utility.
 
-The terminal P5/P4 path temporarily retains its deployed v6 scalar inside
-`terminal-compat-utility.ts`; this compatibility island is replay-gated and must
-not be reused by new song-policy code.
-
-The compatibility `DecisionVector` still exists for durable diagnostics, but
-both song policy and terminal-technique decisions now rank projected mechanics
-through T1b `utilityStatPoints`. Terminal C4 no longer owns a separate
-Friendship-fundability/opportunity-cost model; STOP and PUSH are paired outcomes
-of the same cross-section kernel. See `docs/HORIZON_OUTCOME_V5.md` and
+The terminal P5/P4 compatibility scalar has now been removed as well. Terminal
+technique decisions compare paired native layers instead of a universal
+`utilityStatPoints` delta. The compact terminal technique `DecisionVector` stores
+those same layered deltas explicitly, so the observed-technique sorter cannot
+reintroduce a hidden gate-18 or Friendship scalar. STOP and PUSH remain paired
+outcomes of the same cross-section kernel. See `docs/HORIZON_OUTCOME_V5.md` and
 `docs/P5_TERMINAL_UNIFICATION.md`.
 
 Risk thresholds are:
@@ -213,9 +214,9 @@ C1-C3 still use these values as conservative terminal admission thresholds.
 C4 keeps a distinct *risk* contract, not a distinct economy: its preferred
 profile threshold is not reapplied as a binary veto, while a Wilson 95 % lower
 bound below the catastrophe floor (`max(65%, threshold - 20 points)`) remains a
-hard stop. Above that floor, STOP and PUSH are compared by the same paired T1b
-utility delta used by the unified terminal evaluator. P4 adds the explicit
-paired uncertainty/co-recommendation layer without converting risk into utility.
+hard stop. Above that floor, STOP and PUSH are compared through paired layered
+evidence. P4 keeps statistical uncertainty and co-recommendation explicit rather
+than converting risk into utility.
 
 Probability differences inside the same admission band are weak tie-breakers.
 They do not override mechanical constraints, material structural value, or a

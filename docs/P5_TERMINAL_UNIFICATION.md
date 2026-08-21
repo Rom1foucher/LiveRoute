@@ -9,7 +9,7 @@ observed terminal state
   -> exposed physical page
   -> buy-stop | buy-continue | carry-current-page
   -> shared zero-income cross-section trial (T1a)
-  -> stat-point utility assessment (T1b)
+  -> native layered terminal outcome
   -> paired PUSH - STOP comparison
 ```
 
@@ -25,36 +25,46 @@ The evaluator now receives `songsThisSection` explicitly. This is required to
 value the outgoing Great Success mechanically; reconstructing it from total song
 count would mix two different counters.
 
-## Common outcome and utility
+## Common outcome and layered comparison
 
 There is no C4 branch in `terminal-outcome.ts`. C1 through C4 expose the same
-mechanics:
+mechanics, including deterministic immediate stat/SP rewards, current Great
+Success, structural acquisitions, generic future-training projections and
+retained token stock.
 
-- expected practice-stat delta;
-- expected Skill Points;
-- Friendship training exposure;
-- current Great Success as a discrete gate;
-- projected 16/18 gates when their deadline is inside the rollout;
-- retained token stock as non-utility telemetry.
+The terminal no longer converts those quantities into one stat-point scalar.
+`terminal-layered-value.ts` compares paired common-random-number evidence in this
+order:
 
-Every trial is converted with `terminalUtilityFromTrial()`. Token spending has no
-intrinsic negative utility. It matters only when it changes the set of downstream
-actions that the shared physical rollout can still fund. Consequently STOP is
-the opportunity baseline by construction: `U(PUSH) - U(STOP)` already contains
-lost future purchases without a second reserve model.
+```text
+Great Success
+-> structural tier >= 5 / >= 4 / >= 3 / >= 2
+-> deterministic immediate stat/SP reward
+-> generic practice projection
+-> generic SP projection
+```
 
-### P3b2 compatibility note
+An unresolved upper layer blocks lower layers. Friendship therefore keeps its
+structural priority without `Friendship exposure × rate`, while generic training
+projections remain T2. The 18-song counter and its zero-income reach probability
+are absent from this ranking; they remain progress/funding diagnostics.
 
-P3b2 later removed generic behavioural projections from the **canonical** song
-T1b scalar. Terminal P5/P4 behaviour was already deployed and empirically used
-as a v1.0.2/v6 golden baseline, so that migration is intentionally not performed
-as an incidental side effect. `terminalUtilityFromTrial()` now delegates to the
-private `terminal-compat-utility.ts` island, which preserves the historical
-terminal scalar until a dedicated replay-gated terminal migration is performed.
-The common `HorizonOutcome` mechanics remain shared; only the terminal scalar
-transform is temporarily compatibility-scoped.
+Token spending has no intrinsic negative utility. When a lower-layer PUSH gain
+is real but competes with resource preservation for which no explicit exchange
+rate exists, the primary action stays STOP and PUSH is co-recommended as a
+`resource-tradeoff` instead of manufacturing a token-to-stat conversion.
 
-The removed C4-only code is:
+### P3b2 terminal migration
+
+The temporary `terminal-compat-utility.ts` island introduced during P3b2 has now
+been deleted. The observed-technique sorter receives a typed
+`TerminalTechniqueDecisionVector` containing the same native terminal layers;
+there is no compatibility scalar hidden in technique ranking. Deprecated
+`grossValue`, `expectedOpportunityCost` and `netValue` fields remain zero-valued
+schema aliases for older log consumers during this release. New diagnostics use
+`decisionLayer`, `decisionMetric`, `decisionDelta` and `decisionInterval`.
+
+The removed C4-only code remains:
 
 - `evaluateTerminalC4Value()`;
 - `evaluateTerminalC4OpportunityCost()`;
@@ -66,7 +76,7 @@ The removed C4-only code is:
 P5 unifies value, not every risk policy. C1-C3 retain the profile risk threshold
 as the terminal admission gate. C4 retains the existing Wilson catastrophe
 floor instead of reapplying the generic threshold. Above the applicable safety
-gate, expected paired T1b utility decides PUSH versus STOP.
+gate, paired layered evidence decides PUSH versus STOP.
 
 There is no continuous C4 risk penalty in P5 (`riskPenalty = 0`); uncertainty is
 kept separate from utility.
@@ -79,19 +89,20 @@ P5 deliberately keeps common-random-number paired statistics:
 - `pairedMeanInterval`;
 - `pairedDifferenceSeparated`.
 
-Adaptive convergence requires both reach stability and separation of the paired
-utility delta around zero. If the sample/time budget ends first,
+Adaptive convergence requires both reach stability and separation of the
+currently decisive paired native metric. If the sample/time budget ends first,
 `uncertainAtBudgetLimit` remains true. P4 generalizes these paired statistics into
 the durable separation/convergence and co-recommendation policy documented in
 `docs/ROBUSTNESS_P4.md`.
 
 ## Regression interpretation
 
-Some legacy STOP cases are expected to become PUSH. A filler or late song may be
-worth buying when it yields real Lesson SP, Great Success, or the discrete
-18-song reward and does not destroy any downstream action. This is not token
-spending receiving positive value; it is the direct consequence of removing the
-old intrinsic token/opportunity penalties.
+Some legacy STOP cases are expected to become PUSH when they were driven by the
+old zero-income gate-18 or Friendship scalar. A filler or late song may still be
+worth buying for real Lesson SP or Great Success, but the 18-song counter itself
+never supplies a proportional reward. This is not token spending receiving
+positive value; it follows from comparing explicit consequences in their native
+layers.
 
 Conversely, a STOP must emerge because preserving the current state enables a
 more valuable downstream action in the same rollout, not because a C4-only
@@ -99,8 +110,15 @@ function assigns abstract value to the reserve.
 
 ## Durable diagnostics
 
-P5 changes the meaning of `TerminalTechniqueDecisionSummary.expectedOpportunityCost`:
-it is now `U(STOP)` rather than a C4-specific destroyed-option estimate. The
-NDJSON decision-log schema is therefore **v5**, and solver policy telemetry is
-**`grand-live-v7`**. This is a semantic-version marker for diagnostic artifacts;
-the application package version remains unchanged by this solver patch.
+The canonical terminal explanation is now:
+
+- `decisionLayer`;
+- `decisionMetric`;
+- `decisionDelta`;
+- `decisionInterval`;
+- paired reach/safety evidence and `coRecommendationReason`.
+
+Replay snapshots serialize those fields directly. The previous scalar fields
+`expectedOpportunityCost`, `grossValue` and `netValue` remain zero-valued,
+deprecated compatibility aliases only; they must not be interpreted as terminal
+economics.

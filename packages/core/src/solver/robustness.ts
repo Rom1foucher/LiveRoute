@@ -15,6 +15,7 @@ export const ROBUSTNESS_BATCH_SIZE = 64;
 export type CoRecommendationReason =
   | "monte-carlo-not-separated"
   | "calibration-sensitive"
+  | "resource-tradeoff"
   | "both";
 
 export type RobustnessConvergenceReason =

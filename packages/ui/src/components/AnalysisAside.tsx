@@ -141,6 +141,21 @@ export function AnalysisAside({
                     <span>{t(displayedBlockingAssessment.advisory)}</span>
                   </div>
                 )}
+              {!displayedBlocking &&
+                !forcedTechnique &&
+                displayedTechniqueResult.terminalDecision?.coRecommended.map(
+                  (action) => (
+                    <span
+                      key={action}
+                      className="recommended-option alternative"
+                    >
+                      {t({
+                        code: "terminal.coRecommendedAlternative",
+                        action,
+                      })}
+                    </span>
+                  ),
+                )}
               {displayedTechniqueIndex !== null && (
                 <span
                   className={`recommended-option ${
