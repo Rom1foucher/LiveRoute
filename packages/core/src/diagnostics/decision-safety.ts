@@ -13,6 +13,7 @@ import type {
 import {
   compareSameTokenSupportDominance,
   immediateBlockingTargets,
+  type TechniqueFundingHorizon,
 } from "../solver/technique-dp.ts";
 import { riskThreshold } from "../solver/value.ts";
 
@@ -54,11 +55,13 @@ const techniqueBlockingProof = ({
   candidate,
   songs,
   plan,
+  fundingHorizon,
 }: {
   tokens: Balance;
   candidate: TechniqueCandidate;
   songs: SongTarget[];
   plan: StrategicPlan;
+  fundingHorizon?: TechniqueFundingHorizon;
 }): BlockingProof | null => {
   const after = subtractCost(tokens, candidate.cost);
   if (
@@ -78,6 +81,7 @@ const techniqueBlockingProof = ({
     cost: candidate.cost,
     songs,
     plan,
+    fundingHorizon,
   });
   if (blockedTargets.length > 0) {
     const names = blockedTargets.map((song) => song.name).slice(0, 2);
@@ -99,6 +103,7 @@ export const assessTechniqueChoices = ({
   plan,
   riskProfile,
   recommendedIndex,
+  fundingHorizon,
 }: {
   tokens: Balance;
   candidates: TechniqueCandidate[];
@@ -106,6 +111,7 @@ export const assessTechniqueChoices = ({
   plan: StrategicPlan;
   riskProfile: "safe" | "standard" | "greedy";
   recommendedIndex: number | null;
+  fundingHorizon?: TechniqueFundingHorizon;
 }): TechniqueChoiceAssessment[] => {
   const recommended =
     candidates.find((candidate) => candidate.index === recommendedIndex) ??
@@ -118,6 +124,7 @@ export const assessTechniqueChoices = ({
       candidate,
       songs,
       plan,
+      fundingHorizon,
     });
     if (blocking) {
       return {

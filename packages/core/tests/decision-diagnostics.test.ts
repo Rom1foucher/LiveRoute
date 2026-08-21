@@ -106,6 +106,17 @@ test("P6 song log materializes one canonical T1a/T1b/robustness view", () => {
     );
   }
 
+  assert.equal(diagnostics.gates.status, "available");
+  if (diagnostics.gates.status === "available") {
+    const gate18 = diagnostics.gates.value.find((gate) => gate.id === "gate18");
+    assert.ok(gate18);
+    assert.deepEqual(gate18.reward, {
+      statDelta: 0,
+      skillPointDelta: 0,
+      residualUtilityParameter: null,
+    });
+  }
+
   assert.equal(diagnostics.t2.status, "available");
   if (diagnostics.t2.status === "available") {
     assert.equal(diagnostics.t2.value.friendshipExposureAffectsRanking, false);

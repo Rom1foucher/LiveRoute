@@ -360,9 +360,9 @@ const gateDiagnosticsFromSong = (
         samples,
       }),
       reward: {
-        statDelta: 50,
+        statDelta: 0,
         skillPointDelta: 0,
-        residualUtilityParameter: "SCENARIO_SKILL_UTILITY",
+        residualUtilityParameter: null,
       },
     },
   ];

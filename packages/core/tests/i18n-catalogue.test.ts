@@ -219,9 +219,29 @@ const SAMPLES: Record<MessageCode, Message> = {
     code: "terminal.stopNowNotSeparated",
     coRecommendationReason: "monte-carlo-not-separated",
   },
+  "terminal.coRecommendedAlternative": {
+    code: "terminal.coRecommendedAlternative",
+    action: "expose-and-carry",
+  },
   "terminal.stopNow": {
     code: "terminal.stopNow",
     gain: { code: "terminal.gainNone" },
+  },
+  "terminal.exposeAndCarryLayered": {
+    code: "terminal.exposeAndCarryLayered",
+    layer: "structural",
+    metric: "structural-tier-3",
+    delta: 0.5,
+    reachLowerBound: 0.86,
+    catastropheFloor: 0.72,
+  },
+  "terminal.stopNowLayered": {
+    code: "terminal.stopNowLayered",
+    layer: "structural",
+    metric: "structural-tier-3",
+    delta: -0.1,
+    reachLowerBound: 0.86,
+    catastropheFloor: 0.72,
   },
   "terminal.exposeAndCarryValue": {
     code: "terminal.exposeAndCarryValue",
@@ -247,6 +267,11 @@ const SAMPLES: Record<MessageCode, Message> = {
     opportunityCost: 10,
     riskPenalty: 4.4,
     netValue: 65.6,
+    reachLowerBound: 0.7,
+    catastropheFloor: 0.72,
+  },
+  "terminal.stopNowCatastropheFloorLayered": {
+    code: "terminal.stopNowCatastropheFloorLayered",
     reachLowerBound: 0.7,
     catastropheFloor: 0.72,
   },

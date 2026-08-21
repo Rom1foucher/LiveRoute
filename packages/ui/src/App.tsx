@@ -874,6 +874,10 @@ export default function App({
       plan: strategicPlan,
       riskProfile: effectiveRiskProfile,
       tokenPressure: pressurePreview,
+      fundingHorizon: {
+        timingMode,
+        techniquesRemaining: carriedPageSongIds ? 0 : remaining,
+      },
     });
     const ranked = rankedCandidates.map((candidate) => candidate.payload);
     const rankReasonByOptionIndex = new Map(
@@ -907,6 +911,10 @@ export default function App({
       plan: strategicPlan,
       riskProfile: effectiveRiskProfile,
       recommendedIndex: recommended.index,
+      fundingHorizon: {
+        timingMode,
+        techniquesRemaining: carriedPageSongIds ? 0 : remaining,
+      },
     });
     const analyzedTechniqueStrategy = evaluateTechniqueStrategy({
       concertIndex,
@@ -2249,6 +2257,10 @@ export default function App({
     plan: strategicPlan,
     riskProfile: effectiveRiskProfile,
     tokenPressure: pressurePreview,
+    fundingHorizon: {
+      timingMode,
+      techniquesRemaining: carriedPageSongIds ? 0 : remaining,
+    },
   }).map((candidate) => candidate.payload);
 
   const normalTechniqueStops = Boolean(
@@ -2275,6 +2287,10 @@ export default function App({
       plan: strategicPlan,
       riskProfile: effectiveRiskProfile,
       recommendedIndex: normalTechniqueStops ? null : bestOptionIndex,
+      fundingHorizon: {
+        timingMode,
+        techniquesRemaining: carriedPageSongIds ? 0 : remaining,
+      },
     });
   const forcedTechnique =
     forcePushOverride && normalTechniqueStops

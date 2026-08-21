@@ -125,6 +125,33 @@ test("P4 : au Grand Live, Great Success puis conversion restent indépendants de
   assert.equal(result.recommended?.finalGateStatus, "open");
 });
 
+test("P-R3 : future supply reste dans checkpoint18Status, jamais dans les raisons de policy", () => {
+  const visible = song("future-supply-filler", { dance: 21 });
+  const result = analyzeSongSelection({
+    period: "senior",
+    tokens: balance({ dance: 21 }),
+    visibleSongs: [visible],
+    remainingSongs: [visible],
+    techniquesToNextSong: 2,
+    songsThisSection: 1,
+    totalSongs: 15,
+    concertIndex: 3,
+    timingMode: "section-open",
+    trials: 80,
+  });
+
+  assert.ok(
+    result.policies.some(
+      (policy) => policy.checkpoint18Status === "reachable-with-future-supply",
+    ),
+  );
+  assert.ok(
+    result.policies.every(
+      (policy) => !hasCode(policy.reasons, "reason.gate18FutureSupply"),
+    ),
+  );
+});
+
 test("une cible à -3 tokens donne WAIT_RESERVE pendant une section ouverte", () => {
   const target = song("SP2", { passion: 21, visual: 21 }, ["sp2-target"]);
   const result = analyzeSongSelection({

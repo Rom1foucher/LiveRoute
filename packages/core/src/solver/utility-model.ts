@@ -8,12 +8,10 @@ import type { DecisionVector } from "./value.ts";
 export const PROJECTION_POLICY = "grand-live-zero-income-v1" as const;
 export const UTILITY_MODEL = "grand-live-stat-numeraire-v1" as const;
 export const GREAT_SUCCESS_STAT_DELTA = 35;
-export const GATE18_STAT_DELTA = 50;
 export const STAT_POINT_UTILITY = 1;
 
 export type UtilityParameterId =
   | "SKILL_POINT_UTILITY"
-  | "SCENARIO_SKILL_UTILITY"
   | "SCENARIO_EVENT_UTILITY";
 
 export type UtilityParameter = {
@@ -27,14 +25,11 @@ export type UtilityCalibration = Record<UtilityParameterId, UtilityParameter>;
 
 export const DEFAULT_UTILITY_CALIBRATION: UtilityCalibration = {
   SKILL_POINT_UTILITY: { value: 1, kind: "free", minimum: 0 },
-  SCENARIO_SKILL_UTILITY: { value: 0, kind: "free", minimum: 0 },
   SCENARIO_EVENT_UTILITY: { value: 0, kind: "free", minimum: 0 },
 };
 
 export const SKILL_POINT_UTILITY =
   DEFAULT_UTILITY_CALIBRATION.SKILL_POINT_UTILITY.value;
-export const SCENARIO_SKILL_UTILITY =
-  DEFAULT_UTILITY_CALIBRATION.SCENARIO_SKILL_UTILITY.value;
 export const SCENARIO_EVENT_UTILITY =
   DEFAULT_UTILITY_CALIBRATION.SCENARIO_EVENT_UTILITY.value;
 
@@ -52,7 +47,7 @@ export type UtilityLinearTerms = {
 };
 
 export type UtilityUnprojectedReward = {
-  id: "gate16" | "gate18";
+  id: "gate16";
   reason: "not-crossed";
 };
 
@@ -108,7 +103,6 @@ const number = (outcome: HorizonOutcome, metric: HorizonMetricId): number => {
 
 const zeroCoefficients = (): Record<UtilityParameterId, number> => ({
   SKILL_POINT_UTILITY: 0,
-  SCENARIO_SKILL_UTILITY: 0,
   SCENARIO_EVENT_UTILITY: 0,
 });
 
@@ -156,7 +150,6 @@ export const utilityAssessmentFromOutcome = (
   }
 
   const gate16Crossed = number(outcome, "gate16-crossed") > 0 ? 1 : 0;
-  const gate18Crossed = number(outcome, "gate18-crossed") > 0 ? 1 : 0;
   const unprojectedRewards: UtilityUnprojectedReward[] = [];
 
   if (gate16Crossed) {
@@ -170,26 +163,6 @@ export const utilityAssessmentFromOutcome = (
     });
   } else {
     unprojectedRewards.push({ id: "gate16", reason: "not-crossed" });
-  }
-
-  if (gate18Crossed) {
-    fixedStatPoints += GATE18_STAT_DELTA;
-    coefficients.SCENARIO_SKILL_UTILITY += 1;
-    contributions.push({
-      id: "gate18-stat-delta",
-      sourceMetric: "gate18",
-      value: 1,
-      statPoints: GATE18_STAT_DELTA,
-    });
-    contributions.push({
-      id: "gate18-skill",
-      sourceMetric: "gate18",
-      value: 1,
-      statPoints: calibration.SCENARIO_SKILL_UTILITY.value,
-      parameter: "SCENARIO_SKILL_UTILITY",
-    });
-  } else {
-    unprojectedRewards.push({ id: "gate18", reason: "not-crossed" });
   }
 
   const linearTerms: UtilityLinearTerms = { fixedStatPoints, coefficients };
@@ -212,7 +185,6 @@ export const utilityAssessmentFromOutcome = (
     linearTerms,
     freeParameters: [
       "SKILL_POINT_UTILITY",
-      "SCENARIO_SKILL_UTILITY",
       "SCENARIO_EVENT_UTILITY",
     ],
     unprojectedRewards,

@@ -300,6 +300,10 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       coRecommendationReason: "monte-carlo-not-separated" as const,
       calibrationSensitiveParameters: [],
       calibrationBreakpoints: [],
+      decisionLayer: "risk" as const,
+      decisionMetric: "reach-admission",
+      decisionDelta: 0,
+      decisionInterval: [-1, 1] as const,
       pairedUtility: {
         policy: "grand-live-robustness-v1" as const,
         mean: 0,
@@ -343,7 +347,7 @@ test("v5 distingue P(page) de P(outcome terminal utilisable)", () => {
       pushExpectedPracticeTrainingExposure: 0,
       stopExpectedStructuralPurchases: 0,
       pushExpectedStructuralPurchases: 0,
-      decisionVector: [],
+      decisionVector: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] as const,
     },
   };
   const breakdown = analysisProbabilityBreakdown(result);

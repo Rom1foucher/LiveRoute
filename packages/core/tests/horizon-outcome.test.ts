@@ -173,6 +173,46 @@ test("P3b2 records retained tokens as state without generic token utility", () =
   );
 });
 
+test("P-R2 keeps gate 18 crossing and zero-income reach as telemetry only", () => {
+  const outcome = (gate18Crossed: number, gate18ZeroIncomeReach: number) =>
+    createHorizonOutcome({
+      tieId: "same-action",
+      components: [
+        outcomeComponent("hard-state", 1, "deterministic-consequence"),
+        outcomeComponent(
+          "risk-admissible-state",
+          1,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "gate18-crossed",
+          gate18Crossed,
+          "deterministic-consequence",
+        ),
+        outcomeComponent(
+          "gate18-zero-income-reach",
+          gate18ZeroIncomeReach,
+          "zero-income-projection",
+        ),
+      ],
+    });
+
+  const at17 = outcome(0, 0.05);
+  const at18 = outcome(1, 0.95);
+  assert.notEqual(
+    horizonMetricNumber(at17, "gate18-crossed"),
+    horizonMetricNumber(at18, "gate18-crossed"),
+  );
+  assert.notEqual(
+    horizonMetricNumber(at17, "gate18-zero-income-reach"),
+    horizonMetricNumber(at18, "gate18-zero-income-reach"),
+  );
+  assert.deepEqual(
+    utilityAssessmentFromOutcome(at17),
+    utilityAssessmentFromOutcome(at18),
+  );
+});
+
 test("P3b2 all song actions pass through the same T1a/T1b decision seam", () => {
   const visible = song("visible");
   const deadline = analyzeSongSelection({

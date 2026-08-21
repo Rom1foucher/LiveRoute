@@ -697,8 +697,7 @@ de risque/physique.
 
 La correction est donc expliquée par une vraie différence structurelle :
 environ 42-50 points de probabilité supplémentaires d'acquérir une cible F+5,
-pas par une conversion de Friendship en stats ni par la projection du compteur
-18.
+pas par une conversion de Friendship en stats ni par la projection du compteur 18.
 
 ### `C4-5F24CE38` — trois techniques plus tard
 
@@ -751,3 +750,96 @@ STOP mais son explication passe de la calibration/scalar à un trade-off explici
 Conclusion : le replay diff doit être traité comme un changelog de sémantique
 interne pour ce lot, tandis que les assertions comportementales des fixtures
 acceptées restent les garde-fous de non-régression.
+
+## 24. Cleanup résiduel P-R — implémentation du 21 août
+
+Le lot ciblé P-R0 -> P-R5 a été appliqué sans rouvrir P3b2/HUNT ni modifier le
+catastrophe floor.
+
+### P-R1 — safety horizon-aware
+
+`immediateBlockingTargets()` reçoit désormais un `TechniqueFundingHorizon`
+explicite : `timingMode` et `techniquesRemaining`.
+
+Lorsque la technique évaluée est exactement la dernière avant une page à
+`deadline-now`, la safety et le ranking observé évaluent le wallet après
+`applyPromotionalLiveTransition()`. La page révélée peut être portée à travers
+le concert ; le crédit vérifié de +10 fait donc partie de l'horizon
+déterministe. Aucun revenu futur de training n'est ajouté. Hors de cette
+frontière exacte, le wallet reste `tokens - cost` comme auparavant.
+
+Régressions figées :
+
+```text
+C4-D430E7F8 / option 3
+29 D / 31 P / 10 Vo / 37 Vi / 32 M
+- 14 D / 10 Vi
++ transition C4 -> Grand Live
+=> Harusora 12 D / 32 Vi encore fundable
+=> NOT hard-blocking
+
+C3-C795E47F / option 2
+42 D / 34 P / 30 Vo / 43 Vi / 52 M
+- 25 D
+sans transition garantie
+=> Grow Up and Shine! infundable
+=> hard-blocking
+```
+
+Le même contexte est transmis au classement des techniques observées et aux
+badges de safety UI. Il n'existe donc plus de divergence où le ranking conserve
+un veto que l'explication visuelle aurait retiré.
+
+### P-R2/P-R3 — gate 18 indicatrice uniquement
+
+Le chemin canonique T1b ne contient plus :
+
+- `GATE18_STAT_DELTA = 50` ;
+- `SCENARIO_SKILL_UTILITY` ;
+- les contributions `gate18-stat-delta` / `gate18-skill` ;
+- l'injection générale de `reason.gate18FutureSupply`.
+
+`gate18-crossed`, `gate18-zero-income-reach` et
+`checkpoint18Status` restent présents dans `HorizonOutcome` et les
+diagnostics. Leur reward canonique est désormais :
+
+```text
+statDelta = 0
+skillPointDelta = 0
+residualUtilityParameter = null
+```
+
+Les vrais usages de deadline sont conservés. En particulier,
+`finalGateStatus === failed` reste lié à la jauge manuelle / Great Success du
+Grand Live ; il n'est pas remplacé par le compteur 18.
+
+### Contrats exécutables et validation
+
+Les tests figent les deux cas live, l'invariance de
+`UtilityAssessment` quand seuls `gate18-crossed` ou
+`gate18-zero-income-reach` changent, la disparition de la raison
+`gate18FutureSupply` et la reward diagnostique nulle.
+
+Deux anciennes fixtures de la refonte terminale ont aussi été resynchronisées
+avec leur type déjà en production : quatre champs layered manquants dans la
+fixture de decision-log et quatre messages terminal layered manquants dans le
+catalogue i18n. Cette correction ne modifie pas le solver ; elle restaure le
+typecheck global.
+
+Validation finale :
+
+- suite core complète : `297 / 297` ;
+- noyau ciblé final : `89 / 89` ;
+- typecheck Core/UI/Desktop/Web : OK ;
+- build Web production : OK ;
+- build frontend Desktop + préparation OCR : OK ;
+- `check:docs` et `check:versions` : OK ;
+- diff contrôlé sans bruit de formatage supplémentaire.
+
+Le replay P0 ne change aucune recommandation. Le seul cas modifié,
+`P0_C1_CARRY_PAGE`, diffère uniquement par la suppression de
+`reason.gate18FutureSupply` et le décalage des reason codes suivants.
+
+Le packaging Tauri natif n'a pas été exécuté dans cet environnement car
+`cargo` n'y est pas installé. Le frontend Desktop et son typecheck sont
+validés ; aucun fichier Rust n'a été modifié.

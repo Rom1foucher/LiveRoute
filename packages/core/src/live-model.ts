@@ -361,7 +361,6 @@ export type TerminalTechniqueDecisionVector = readonly [
 export type TerminalUtilityBreakpoint = {
   parameter:
     | "SKILL_POINT_UTILITY"
-    | "SCENARIO_SKILL_UTILITY"
     | "SCENARIO_EVENT_UTILITY";
   value: number;
   scope: "fixed-projection-policy";

@@ -161,6 +161,107 @@ test("une technique plus chère sur les mêmes couleurs est secondaire, pas roug
   assert.match(fr(assessments[1]?.advisory), /effet propre.*Energy/i);
 });
 
+test("P-R1 C4-D430E7F8 : le +10 garanti préserve Harusora à la frontière du concert", () => {
+  const harusora: SongTarget = {
+    id: "harusora",
+    name: "Sky-Blue Spring",
+    cost: balance({ dance: 12, visual: 32 }),
+    priority: true,
+    roles: ["friendship-5"],
+    utility: 4,
+  };
+  const tokens = balance({
+    dance: 29,
+    passion: 31,
+    vocal: 10,
+    visual: 37,
+    mental: 32,
+  });
+  const plan = deriveStrategicPlan({
+    concertIndex: 3,
+    timingMode: "deadline-now",
+    remainingSongs: [harusora],
+    songsThisSection: 5,
+  });
+  const assessments = assessTechniqueChoices({
+    tokens,
+    candidates: [
+      {
+        index: 0,
+        cost: balance({ passion: 10 }),
+        result: analysis(0.8),
+      },
+      {
+        index: 2,
+        cost: balance({ dance: 14, visual: 10 }),
+        result: analysis(0.76),
+      },
+    ],
+    songs: [harusora],
+    plan,
+    riskProfile: "standard",
+    recommendedIndex: 0,
+    fundingHorizon: {
+      timingMode: "deadline-now",
+      techniquesRemaining: 1,
+    },
+  });
+
+  const option3 = assessments.find((candidate) => candidate.index === 2);
+  assert.ok(option3);
+  assert.notEqual(option3.safety, "hard-blocking");
+  assert.equal(option3.blocking, null);
+});
+
+test("P-R1 C3-C795E47F : sans transition garantie, le blocage SP3 reste dur", () => {
+  const growUp: SongTarget = {
+    id: "grow-up-shine",
+    name: "Grow Up and Shine!",
+    cost: balance({ dance: 21, vocal: 21, mental: 21 }),
+    priority: true,
+    roles: ["sp3-target"],
+    utility: 10,
+  };
+  const tokens = balance({
+    dance: 42,
+    passion: 34,
+    vocal: 30,
+    visual: 43,
+    mental: 52,
+  });
+  const plan = deriveStrategicPlan({
+    concertIndex: 2,
+    timingMode: "section-open",
+    remainingSongs: [growUp],
+  });
+  const assessments = assessTechniqueChoices({
+    tokens,
+    candidates: [
+      {
+        index: 0,
+        cost: balance({ passion: 10 }),
+        result: analysis(0.8),
+      },
+      {
+        index: 1,
+        cost: balance({ dance: 25 }),
+        result: analysis(0),
+      },
+    ],
+    songs: [growUp],
+    plan,
+    riskProfile: "standard",
+    recommendedIndex: 0,
+    fundingHorizon: {
+      timingMode: "section-open",
+      techniquesRemaining: 1,
+    },
+  });
+
+  assert.equal(assessments[1]?.safety, "hard-blocking");
+  assert.equal(assessments[1]?.blocking?.targetId, "grow-up-shine");
+});
+
 test("P4 : checkpoint 18 impossible ne rend plus une song rouge", () => {
   const visible: SongTarget[] = [
     {

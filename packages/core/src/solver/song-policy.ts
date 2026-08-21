@@ -359,9 +359,6 @@ const statusReasons = (
   if (status18 === "impossible") {
     reasons.push({ code: "reason.gate18Impossible" });
   }
-  if (status18 === "reachable-with-future-supply") {
-    reasons.push({ code: "reason.gate18FutureSupply" });
-  }
   if (status16 === "indeterminate" || status18 === "indeterminate") {
     reasons.push({ code: "reason.capacityIndeterminate" });
   }

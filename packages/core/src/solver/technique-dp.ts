@@ -9,6 +9,10 @@ import {
   isVisibleOptionalTarget,
   type StrategicPlan,
 } from "../planner/strategic-plan.ts";
+import {
+  applyPromotionalLiveTransition,
+  type TimingMode,
+} from "../domain/live-rules.ts";
 import type { SongDpTarget } from "./song-dp.ts";
 import { evaluatePageCoverage } from "./song-dp.ts";
 import { riskThreshold } from "./value.ts";
@@ -25,6 +29,13 @@ export type TechniqueDecisionCandidate<T = unknown> = {
 };
 
 type ImmediateTarget = SongDpTarget & { priority?: boolean };
+
+export type TechniqueFundingHorizon = {
+  timingMode: TimingMode;
+  /** Number of techniques still required before the next song page, including
+   * the candidate currently being assessed. */
+  techniquesRemaining: number;
+};
 
 const canAfford = (tokens: Balance, cost: Balance): boolean =>
   TOKEN_KEYS.every((key) => tokens[key] >= cost[key]);
@@ -79,6 +90,7 @@ const buildTechniqueRankSnapshot = <T>({
   plan,
   threshold,
   tokenPressure,
+  fundingHorizon,
 }: {
   candidate: TechniqueDecisionCandidate<T>;
   tokens: Balance;
@@ -86,11 +98,17 @@ const buildTechniqueRankSnapshot = <T>({
   plan: StrategicPlan;
   threshold: number;
   tokenPressure: TokenPressure[];
+  fundingHorizon?: TechniqueFundingHorizon;
 }): TechniqueRankSnapshot => {
   const affordable = canAfford(tokens, candidate.cost);
   const blocking =
-    immediateBlockingTargets({ tokens, cost: candidate.cost, songs, plan })
-      .length > 0;
+    immediateBlockingTargets({
+      tokens,
+      cost: candidate.cost,
+      songs,
+      plan,
+      fundingHorizon,
+    }).length > 0;
   const spend = techniqueSpendMetrics(candidate.cost, tokens, tokenPressure);
   const after = affordable ? subtract(tokens, candidate.cost) : tokens;
   const coverage = affordable
@@ -209,11 +227,13 @@ export const immediateBlockingTargets = ({
   cost,
   songs,
   plan,
+  fundingHorizon,
 }: {
   tokens: Balance;
   cost: Balance;
   songs: ImmediateTarget[];
   plan: StrategicPlan;
+  fundingHorizon?: TechniqueFundingHorizon;
 }): ImmediateTarget[] => {
   // At the Grand Live there is no future reserve to protect. Every affordable
   // Technique itself converts tokens into +5 SP, and remaining songs are
@@ -234,8 +254,19 @@ export const immediateBlockingTargets = ({
     canAfford(tokens, song.cost),
   );
   if (affordableBefore.length === 0) return [];
+
+  // When the assessed technique deterministically opens the final song page
+  // at a concert boundary, that page can be carried across the promotional
+  // live. Funding safety must therefore include the verified +10 transition,
+  // not mislabel the short intermediate wallet as a permanent hard block.
+  // No stochastic training income is assumed here.
+  const fundingBalance =
+    fundingHorizon?.timingMode === "deadline-now" &&
+    fundingHorizon.techniquesRemaining === 1
+      ? applyPromotionalLiveTransition(after, plan.concertIndex)
+      : after;
   const affordableAfter = affordableBefore.filter((song) =>
-    canAfford(after, song.cost),
+    canAfford(fundingBalance, song.cost),
   );
   return affordableAfter.length === 0 ? affordableBefore : [];
 };
@@ -391,6 +422,7 @@ export const rankObservedTechniques = <T>({
   plan,
   riskProfile,
   tokenPressure,
+  fundingHorizon,
 }: {
   candidates: TechniqueDecisionCandidate<T>[];
   tokens: Balance;
@@ -398,6 +430,7 @@ export const rankObservedTechniques = <T>({
   plan: StrategicPlan;
   riskProfile: "safe" | "standard" | "greedy";
   tokenPressure: TokenPressure[];
+  fundingHorizon?: TechniqueFundingHorizon;
 }): RankedTechniqueDecisionCandidate<T>[] => {
   const threshold = riskThreshold(riskProfile);
   const snapshots = new Map(
@@ -410,6 +443,7 @@ export const rankObservedTechniques = <T>({
         plan,
         threshold,
         tokenPressure,
+        fundingHorizon,
       }),
     ]),
   );

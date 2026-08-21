@@ -56,7 +56,8 @@ T1a owns units and provenance, not utility. Relevant mechanical families are:
 | expected Skill Points from future trainings | skill-point | generic behavioural projection | T2 |
 | Friendship exposure | friendship-pt-training | generic behavioural projection | diagnostic only |
 | Great Success crossed/reach | count / probability | deterministic or zero-income projection | crossed → T1b; reach → mechanics |
-| Gate 16/18 crossed/reach | count / probability | deterministic or zero-income projection | crossed → T1b; reach → mechanics |
+| Gate 16 crossed/reach | count / probability | deterministic or zero-income projection | crossed → T1b residual; reach → mechanics |
+| Gate 18 crossed/reach | count / probability | deterministic or zero-income projection | indicator/diagnostic only |
 | funding gaps / retained tokens | token | observed/projected state | mechanics |
 
 Tokens remain state only. They never receive a generic exchange rate into
@@ -86,9 +87,8 @@ Canonical T1b contains only deterministic consequences of the current action:
 ```text
 immediateStatDelta
 + GREAT_SUCCESS_STAT_DELTA × greatSuccessSecured
-+ GATE18_STAT_DELTA × gate18Crossed
 + immediate/lesson Skill Points × SKILL_POINT_UTILITY
-+ named scenario residuals for gates actually crossed
++ named scenario residual for gate 16 when crossed
 ```
 
 Mechanical constants:
@@ -96,14 +96,12 @@ Mechanical constants:
 ```text
 STAT_POINT_UTILITY       = 1
 GREAT_SUCCESS_STAT_DELTA = 35
-GATE18_STAT_DELTA        = 50
 ```
 
 Free policy parameters remain:
 
 ```text
 SKILL_POINT_UTILITY    = 1.0 nominal seed
-SCENARIO_SKILL_UTILITY = 0
 SCENARIO_EVENT_UTILITY = 0
 ```
 
@@ -128,13 +126,16 @@ This keeps the original use case: at equal structure and cost, a generic
 `HorizonOutcome` and logs for analysis but does not vote in the canonical song
 comparison.
 
-## Discrete gates
+## Discrete gates and the 18-song checkpoint
 
-Great Success and the 16/18 gates are discrete rewards. Raw progress such as
-`15 / 18` is never converted proportionally. Canonical T1b rewards a gate only
-when the current action actually crosses it. A `zeroIncomeReach` probability is
-still valuable mechanics/diagnostics, but it is not silently converted into a
-fraction of the deterministic gate reward.
+Great Success remains a discrete deterministic reward. Gate 16 keeps only its
+named scenario-event residual. Raw progress is never converted proportionally.
+
+The 18-song checkpoint is deliberately different: it is a progress indicator
+and a deadline guard, not an economic reward. Crossing `17 -> 18` does not add
+stat-point utility and `gate18-zero-income-reach` cannot rank ordinary actions.
+Both metrics remain in `HorizonOutcome` and canonical diagnostics so the UI can
+show progress, conservative funding evidence and a real last-moment failure.
 
 ## HUNT
 
@@ -241,8 +242,10 @@ selection itself is the paired T1b comparison documented in
 1. T1a remains mechanical and ranking-free.
 2. Every cross-unit conversion is named in T1b.
 3. Stat points are the explicit numeraire.
-4. Great Success and 16/18 remain discrete gates.
-5. Raw progress below a gate receives no fractional reward.
+4. Great Success and gate 16 remain discrete utility events; gate 18 is an
+   indicator/deadline guard only.
+5. Raw progress below a gate receives no fractional reward, and crossing 18
+   receives no ordinary action-ranking reward.
 6. Tokens have no intrinsic utility.
 7. Unknown/interval mechanics cannot silently scalarize to zero.
 8. Breakpoints are conditional on the fixed projection policy.
